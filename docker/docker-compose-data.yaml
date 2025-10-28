@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  prepare-qasper:
+    image: python:3.11-slim
+    container_name: prepare-qasper
+    volumes:
+      - qasperdata:/mnt
+      - ../scripts:/scripts
+    working_dir: /scripts
+    command: >
+      bash -c "apt-get update -y &&
+      apt-get install -y git &&
+      pip install pandas datasets==2.19.1 &&
+      python prepare_qasper.py"
+    restart: "no"
+
+volumes:
+  qasperdata:
+    external: true
+

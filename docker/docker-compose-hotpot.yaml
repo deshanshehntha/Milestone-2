@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  prepare-hotpot:
+    image: python:3.11-slim
+    container_name: prepare-hotpot
+    working_dir: /scripts
+    volumes:
+      - hotpotdata:/mnt
+      - ../scripts:/scripts
+    command: >
+      bash -c "apt-get update -y &&
+      apt-get install -y git &&
+      pip install --upgrade pip &&
+      pip install pandas kagglehub &&
+      python prepare_hotpot.py"
+    restart: "no"
+
+volumes:
+  hotpotdata:
+    external: true
+

@@ -1,0 +1,38 @@
+version: "3.8"
+
+services:
+  prepare-qasper:
+    image: python:3.11-slim
+    container_name: prepare-qasper
+    working_dir: /scripts
+    volumes:
+      - qasperdata:/mnt
+      - ../scripts:/scripts
+    command: >
+      bash -c "apt-get update -y &&
+      apt-get install -y git &&
+      pip install --upgrade pip &&
+      pip install pandas datasets==2.19.1 &&
+      python prepare_qasper.py"
+    restart: "no"
+
+  prepare-hotpot:
+    image: python:3.11-slim
+    container_name: prepare-hotpot
+    working_dir: /scripts
+    volumes:
+      - hotpotdata:/mnt
+      - ../scripts:/scripts
+    command: >
+      bash -c "apt-get update -y &&
+      apt-get install -y git &&
+      pip install --upgrade pip &&
+      pip install pandas kagglehub &&
+      python prepare_hotpot.py"
+    restart: "no"
+
+volumes:
+  qasperdata:
+    external: true
+  hotpotdata:
+    external: true
