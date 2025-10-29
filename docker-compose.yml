@@ -1,0 +1,101 @@
+version: "3.9"
+
+services:
+
+  prepare-hotpotqa:
+    build:
+      context: ./scripts/hotpotqa
+      dockerfile: Dockerfile
+    container_name: prepare-hotpotqa
+    volumes:
+      - hotpotdata:/mnt/HotpotQA
+      - chromadbdata:/mnt/ChromaDb
+
+  prepare-qasper:
+    build:
+      context: ./scripts/qasper
+      dockerfile: Dockerfile
+    container_name: prepare-qasper
+    volumes:
+      - qasperdata:/mnt/Qasper
+      - chromadbdata:/mnt/ChromaDb
+
+  tinyroberta:
+    build:
+      context: ./models/tinyroberta
+      dockerfile: Dockerfile
+    container_name: tinyroberta
+    expose:
+      - "50051"
+    depends_on:
+      - prepare-hotpotqa
+    volumes:
+      - hotpotdata:/mnt/HotpotQA
+      - chromadbdata:/mnt/ChromaDb
+
+  roberta-base:
+    build:
+      context: ./models/roberta-base
+      dockerfile: Dockerfile
+    container_name: roberta-base
+    expose:
+      - "50051"
+    depends_on:
+      - prepare-hotpotqa
+    volumes:
+      - hotpotdata:/mnt/HotpotQA
+      - chromadbdata:/mnt/ChromaDb
+
+  bert-large:
+    build:
+      context: ./models/bert-large
+      dockerfile: Dockerfile
+    container_name: bert-large
+    expose:
+      - "50051"
+    depends_on:
+      - prepare-hotpotqa
+    volumes:
+      - hotpotdata:/mnt/HotpotQA
+      - chromadbdata:/mnt/ChromaDb
+
+
+  router:
+    build:
+      context: ./router
+      dockerfile: Dockerfile
+    container_name: qa-router
+    ports:
+      - "50050:50050"
+    environment:
+      BACKENDS_TINYROBERTA: "tinyroberta:50051"
+      BACKENDS_ROBERTA_BASE: "roberta-base:50051"
+      BACKENDS_BERT_LARGE: "bert-large:50051"
+    depends_on:
+      - tinyroberta
+      - roberta-base
+      - bert-large
+    volumes:
+      - chromadbdata:/mnt/ChromaDb
+
+  evaluate-pipeline:
+    build:
+      context: .
+      dockerfile: evaluate/Dockerfile
+    container_name: evaluate-pipeline
+    depends_on:
+      - router
+      - tinyroberta
+      - roberta-base
+      - bert-large
+    environment:
+      - ROUTER_ADDR=router:50050
+    volumes:
+      - ./scripts:/app/scripts           # for datasets
+      - chromadbdata:/mnt/ChromaDb       # shared ChromaDB
+      - ./results:/mnt/results           # to save evaluation outputs
+
+volumes:
+  hotpotdata:
+  qasperdata:
+  chromadbdata:
