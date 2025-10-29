@@ -21,7 +21,7 @@ embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
 def wait_for_datasets():
     print("Waiting for datasets to be ready...")
-    max_wait = 900  
+    max_wait = 1899  
     start_time = time.time()
     required = [Path(DATASETS["Qasper"]), Path(DATASETS["HotpotQA"])]
     while True:
