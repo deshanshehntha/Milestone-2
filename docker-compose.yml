@@ -59,7 +59,6 @@ services:
       - hotpotdata:/mnt/HotpotQA
       - chromadbdata:/mnt/ChromaDb
 
-
   router:
     build:
       context: ./router
@@ -85,15 +84,15 @@ services:
     container_name: evaluate-pipeline
     depends_on:
       - router
-      - tinyroberta
-      - roberta-base
-      - bert-large
+      - prepare-hotpotqa
+      - prepare-qasper
     environment:
-      - ROUTER_ADDR=router:50050
+      - ROUTER_ADDR=qa-router:50050
     volumes:
-      - ./scripts:/app/scripts           # for datasets
-      - chromadbdata:/mnt/ChromaDb       # shared ChromaDB
-      - ./results:/mnt/results           # to save evaluation outputs
+      - hotpotdata:/mnt/HotpotQA       
+      - qasperdata:/mnt/Qasper         
+      - chromadbdata:/mnt/ChromaDb     
+      - ./results:/mnt/results         
 
 volumes:
   hotpotdata:
