@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08qa.proto\x12\x02qa\".\n\x08Question\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x10\n\x08paper_id\x18\x02 \x01(\t\"w\n\x0e\x41nswerResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12\x12\n\nconfidence\x18\x02 \x01(\x01\x12\x14\n\x0cretrieval_ms\x18\x03 \x01(\x01\x12\x14\n\x0cinference_ms\x18\x04 \x01(\x01\x12\x15\n\rend_to_end_ms\x18\x05 \x01(\x01\x32\x38\n\x08QAServer\x12,\n\x06\x41nswer\x12\x0c.qa.Question\x1a\x12.qa.AnswerResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x08qa.proto\x12\x02qa\"?\n\x08Question\x12\x10\n\x08question\x18\x01 \x01(\t\x12\x0f\n\x07\x63ontext\x18\x02 \x01(\t\x12\x10\n\x08paper_id\x18\x03 \x01(\t\"w\n\x0e\x41nswerResponse\x12\x0e\n\x06\x61nswer\x18\x01 \x01(\t\x12\x12\n\nconfidence\x18\x02 \x01(\x01\x12\x14\n\x0cretrieval_ms\x18\x03 \x01(\x01\x12\x14\n\x0cinference_ms\x18\x04 \x01(\x01\x12\x15\n\rend_to_end_ms\x18\x05 \x01(\x01\x32\x38\n\x08QAServer\x12,\n\x06\x41nswer\x12\x0c.qa.Question\x1a\x12.qa.AnswerResponse\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,9 +32,9 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'qa_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_QUESTION']._serialized_start=16
-  _globals['_QUESTION']._serialized_end=62
-  _globals['_ANSWERRESPONSE']._serialized_start=64
-  _globals['_ANSWERRESPONSE']._serialized_end=183
-  _globals['_QASERVER']._serialized_start=185
-  _globals['_QASERVER']._serialized_end=241
+  _globals['_QUESTION']._serialized_end=79
+  _globals['_ANSWERRESPONSE']._serialized_start=81
+  _globals['_ANSWERRESPONSE']._serialized_end=200
+  _globals['_QASERVER']._serialized_start=202
+  _globals['_QASERVER']._serialized_end=258
 # @@protoc_insertion_point(module_scope)

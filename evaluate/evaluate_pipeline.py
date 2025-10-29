@@ -36,7 +36,7 @@ def wait_for_datasets():
 
 
 def wait_for_router(addr="qa-router", port=50050, timeout=300):
-    print(f"⏳ Waiting for router at {addr}:{port}...")
+    print(f" Waiting for router at {addr}:{port}...")
     start = time.time()
     while time.time() - start < timeout:
         try:

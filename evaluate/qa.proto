@@ -7,8 +7,10 @@ service QAServer {
 
 message Question {
   string question = 1;
-  string paper_id = 2; // optional
+  string context = 2;   
+  string paper_id = 3;
 }
+
 
 message AnswerResponse {
   string answer = 1;
