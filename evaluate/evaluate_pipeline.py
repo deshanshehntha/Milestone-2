@@ -8,7 +8,6 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer, util
 import qa_pb2, qa_pb2_grpc
 
-# ---------------- CONFIG ----------------
 ROUTER_ADDR = "qa-router:50050"  # inside docker network
 VARIANTS = ["tinyroberta", "roberta_base", "bert_large"]
 OUTPUT_PATH = "results/all_model_results.csv"
@@ -17,22 +16,20 @@ DATASETS = {
     "HotpotQA": "/mnt/HotpotQA/processed_hotpot_df.csv",
 }
 
-# Sentence embedding model for cosine similarity evaluation
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
 
-# ---------------- HELPERS ----------------
 def wait_for_datasets():
-    print("⏳ Waiting for datasets to be ready...")
-    max_wait = 900  # 15 minutes
+    print("Waiting for datasets to be ready...")
+    max_wait = 900  
     start_time = time.time()
     required = [Path(DATASETS["Qasper"]), Path(DATASETS["HotpotQA"])]
     while True:
         if all(f.exists() for f in required):
-            print("✅ Both datasets found.")
+            print("Both datasets found.")
             return True
         if time.time() - start_time > max_wait:
-            print("❌ Timeout waiting for datasets.")
+            print("Timeout waiting for datasets.")
             return False
         print("...still waiting for datasets...")
         time.sleep(10)
@@ -44,11 +41,11 @@ def wait_for_router(addr="qa-router", port=50050, timeout=300):
     while time.time() - start < timeout:
         try:
             with socket.create_connection((addr, port), timeout=5):
-                print("✅ Router is ready.")
+                print("Router is ready.")
                 return True
         except OSError:
             time.sleep(5)
-    print("❌ Router not reachable after timeout.")
+    print("Router not reachable after timeout.")
     return False
 
 
@@ -84,7 +81,7 @@ def ask_question(stub, question, paper_id, variant, retries=3):
         except grpc.RpcError as e:
             print(f"⚠️ gRPC error ({variant}) attempt {attempt+1}: {e.code().name}")
             time.sleep(5)
-    print(f"❌ Failed after {retries} retries for {variant}.")
+    print(f" Failed after {retries} retries for {variant}.")
     return {
         "variant": variant,
         "question": question,
@@ -99,12 +96,12 @@ def ask_question(stub, question, paper_id, variant, retries=3):
 
 
 def evaluate_dataset(name, path, stub):
-    print(f"📘 Evaluating dataset: {name}")
+    print(f" Evaluating dataset: {name}")
     df = pd.read_csv(path)
 
     # Normalize
     if "question" not in df.columns or len(df) == 0:
-        print(f"⚠️ No valid questions found in {name}")
+        print(f"No valid questions found in {name}")
         return None
 
     if "free_form_answer" in df.columns:
@@ -148,13 +145,13 @@ def main():
                     all_results.append(res_df)
 
     if not all_results:
-        print("❌ No results generated.")
+        print(" No results generated.")
         return
 
     combined = pd.concat(all_results, ignore_index=True)
     combined.to_csv(OUTPUT_PATH, index=False)
 
-    print(f"\n✅ Saved all results to {OUTPUT_PATH}")
+    print(f"\n Saved all results to {OUTPUT_PATH}")
     print("Average Cosine Similarity:", combined["cosine_sim"].mean())
     print("Average Confidence:", combined["confidence"].mean())
     print("Average Latency (ms):", combined["end_to_end_ms"].mean())

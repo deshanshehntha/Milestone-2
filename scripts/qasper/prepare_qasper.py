@@ -25,25 +25,25 @@ out_path = "/mnt/Qasper/processed_qasper_df.csv"
 df.to_csv(out_path, index=False)
 print(f"Saved {len(df)} QASPER papers to {out_path}")
 
-# --- Create ChromaDB collection ---
-print(" Building ChromaDB collection for QASPER...")
-chroma_client = chromadb.PersistentClient(path="/mnt/ChromaDb")
-collection_name = "qasper_data_collection"
+# # --- Create ChromaDB collection ---
+# print(" Building ChromaDB collection for QASPER...")
+# chroma_client = chromadb.PersistentClient(path="/mnt/ChromaDb")
+# collection_name = "qasper_data_collection"
 
-try:
-    chroma_client.delete_collection(collection_name)
-    print(f"Old collection '{collection_name}' deleted.")
-except Exception:
-    pass
+# try:
+#     chroma_client.delete_collection(collection_name)
+#     print(f"Old collection '{collection_name}' deleted.")
+# except Exception:
+#     pass
 
-embedding_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-collection = chroma_client.create_collection(name=collection_name, embedding_function=embedding_fn)
+# embedding_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+# collection = chroma_client.create_collection(name=collection_name, embedding_function=embedding_fn)
 
-for _, row in tqdm(df.iterrows(), total=len(df), desc="Embedding QASPER"):
-    text = str(row["text"])
-    chunks = [text[i:i + 1000] for i in range(0, len(text), 1000)]
-    ids = [f"{row['paper_id']}_{i}" for i in range(len(chunks))]
-    metadatas = [{"paper_id": row["paper_id"]} for _ in chunks]
-    collection.add(documents=chunks, ids=ids, metadatas=metadatas)
+# for _, row in tqdm(df.iterrows(), total=len(df), desc="Embedding QASPER"):
+#     text = str(row["text"])
+#     chunks = [text[i:i + 1000] for i in range(0, len(text), 1000)]
+#     ids = [f"{row['paper_id']}_{i}" for i in range(len(chunks))]
+#     metadatas = [{"paper_id": row["paper_id"]} for _ in chunks]
+#     collection.add(documents=chunks, ids=ids, metadatas=metadatas)
 
-print(f" ChromaDB QASPER collection '{collection_name}' ready at /mnt/ChromaDb")
+# print(f" ChromaDB QASPER collection '{collection_name}' ready at /mnt/ChromaDb")
