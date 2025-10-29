@@ -42,7 +42,7 @@ print(f"Saved processed HotpotQA CSV to {out_csv}")
 # print(" Building ChromaDB collection for HotpotQA...")
 # chroma_client = chromadb.PersistentClient(path="/mnt/ChromaDb")
 # collection_name = "hpqa_data_collection"
-s
+
 # try:
 #     chroma_client.delete_collection(collection_name)
 #     print(f"Old collection '{collection_name}' deleted.")
