@@ -6,7 +6,7 @@ from minio.error import S3Error
 MODELS = {
     "tinyroberta": "deepset/tinyroberta-squad2",
     "roberta-base": "deepset/roberta-base-squad2",
-    "bert-large": "deepset/bert-large-uncased-whole-word-masking-finetuned-squad2"
+    "bert-large": "google-bert/bert-large-uncased-whole-word-masking-finetuned-squad"
 }
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
