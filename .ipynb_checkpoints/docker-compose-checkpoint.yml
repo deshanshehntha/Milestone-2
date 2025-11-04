@@ -1,7 +1,6 @@
 version: "3.9"
 
 services:
-
   prepare-hotpotqa:
     build:
       context: ./scripts/hotpotqa
@@ -20,44 +19,82 @@ services:
       - qasperdata:/mnt/Qasper
       - chromadbdata:/mnt/ChromaDb
 
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # API endpoint
+      - "9001:9001"   # Web console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio_data:/data
+
+  setup-minio:
+    build:
+      context: ./minio
+      dockerfile: Dockerfile
+    container_name: setup-minio
+    depends_on:
+      - minio
+    environment:
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+    volumes:
+      - ./downloaded_models:/downloaded_models
+    command: ["python", "setup_minio.py"]
+
+
   tinyroberta:
     build:
-      context: ./models/tinyroberta
+      context: ./models/server
       dockerfile: Dockerfile
     container_name: tinyroberta
     expose:
       - "50051"
+    environment:
+      - MODEL_NAME=tinyroberta
+      - MODEL_ID=deepset/tinyroberta-squad2
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
     depends_on:
-      - prepare-hotpotqa
-    volumes:
-      - hotpotdata:/mnt/HotpotQA
-      - chromadbdata:/mnt/ChromaDb
+      - setup-minio
 
   roberta-base:
     build:
-      context: ./models/roberta-base
+      context: ./models/server
       dockerfile: Dockerfile
     container_name: roberta-base
     expose:
       - "50051"
+    environment:
+      - MODEL_NAME=roberta-base
+      - MODEL_ID=deepset/roberta-base-squad2
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
     depends_on:
-      - prepare-hotpotqa
-    volumes:
-      - hotpotdata:/mnt/HotpotQA
-      - chromadbdata:/mnt/ChromaDb
+      - setup-minio
 
   bert-large:
     build:
-      context: ./models/bert-large
+      context: ./models/server
       dockerfile: Dockerfile
     container_name: bert-large
     expose:
       - "50051"
+    environment:
+      - MODEL_NAME=bert-large
+      - MODEL_ID=deepset/bert-large-uncased-whole-word-masking-finetuned-squad
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
     depends_on:
-      - prepare-hotpotqa
-    volumes:
-      - hotpotdata:/mnt/HotpotQA
-      - chromadbdata:/mnt/ChromaDb
+      - setup-minio
 
   router:
     build:
@@ -89,22 +126,10 @@ services:
     environment:
       - ROUTER_ADDR=qa-router:50050
     volumes:
-      - hotpotdata:/mnt/HotpotQA       
-      - qasperdata:/mnt/Qasper         
-      - chromadbdata:/mnt/ChromaDb     
-      - ./results:/mnt/results         
-  minio:
-    image: minio/minio:latest
-    container_name: minio
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"   # API endpoint
-      - "9001:9001"   # Web console
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
-    volumes:
-      - minio_data:/data
+      - hotpotdata:/mnt/HotpotQA
+      - qasperdata:/mnt/Qasper
+      - chromadbdata:/mnt/ChromaDb
+      - ./results:/mnt/results
 
 volumes:
   hotpotdata:
