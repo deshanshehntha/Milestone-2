@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     pip install --no-cache-dir pandas tqdm "datasets<4.0.0" && \
     pip install --no-cache-dir "chromadb[cpu]" && \
     pip install --no-cache-dir "sentence-transformers==2.2.2" && \
+    pip install kagglehub && \
     apt-get remove -y build-essential && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 CMD ["python", "prepare_hotpot.py"]
