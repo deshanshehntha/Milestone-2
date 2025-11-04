@@ -70,7 +70,14 @@ class QAServicer(qa_pb2_grpc.QAServerServicer):
     # -------------------------------------------------------------------------
     async def Answer(self, request, context):
         t0 = time.perf_counter()
-        ins = self.tok(request.question, return_tensors="pt", truncation=True, max_length=384)
+        # ins = self.tok(request.question, return_tensors="pt", truncation=True, max_length=384)
+        ins = self.tok(
+            request.question,
+            request.context or "",      
+            return_tensors="pt",
+            truncation=True,
+            max_length=384
+        )
         t1 = time.perf_counter()
         with torch.no_grad():
             out = self.mdl(**ins)
