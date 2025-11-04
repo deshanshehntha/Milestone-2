@@ -12,13 +12,58 @@ print("Loading QASPER dataset from HuggingFace...")
 qasper_ds = load_dataset("allenai/qasper", split="train")
 
 rows = []
-for paper in tqdm(qasper_ds, desc="Processing QASPER"):
+for paper in qasper_ds:
     paper_id = paper["id"]
-    title = paper["title"]
+    title    = paper["title"]
+    abstract = paper["abstract"]
+
+    # full_text is a dict of columns
     sec_names = paper["full_text"]["section_name"]
     sec_paras = paper["full_text"]["paragraphs"]
-    full_text = "\n\n".join(f"{s}\n" + "\n".join(p) for s, p in zip(sec_names, sec_paras))
-    rows.append({"paper_id": paper_id, "title": title, "text": full_text})
+    full_text = "\n\n".join(
+        f"{sec}\n" + "\n".join(p) for sec, p in zip(sec_names, sec_paras)
+    )
+
+    qas = paper["qas"]
+    n_questions = len(qas["question"])
+
+    for i in range(n_questions):
+        question_id   = qas["question_id"][i]
+        question_text = qas["question"][i]
+        nlp_bg        = qas["nlp_background"][i]
+        topic_bg      = qas["topic_background"][i]
+        paper_read    = qas["paper_read"][i]
+        search_query  = qas["search_query"][i]
+        question_writer = qas["question_writer"][i]
+
+        # answers is ALSO a dict of parallel lists
+        answers_block = qas["answers"][i]
+        for ans, ann_id, worker_id in zip(
+            answers_block["answer"],
+            answers_block["annotation_id"],
+            answers_block["worker_id"]
+        ):
+            rows.append({
+                "paper_id"        : paper_id,
+                "title"           : title,
+                "abstract"        : abstract,
+                "context"        : full_text,
+                "question_id"     : question_id,
+                "question"        : question_text,
+                "nlp_background"  : nlp_bg,
+                "topic_background": topic_bg,
+                "paper_read"      : paper_read,
+                "search_query"    : search_query,
+                "question_writer" : question_writer,
+                "annotation_id"   : ann_id,
+                "worker_id"       : worker_id,
+                "unanswerable"    : ans["unanswerable"],
+                "yes_no"          : ans["yes_no"],
+                "free_form_answer": ans["free_form_answer"],
+                "extractive_spans": "; ".join(ans["extractive_spans"]),
+                "evidence"        : "; ".join(ans["evidence"]),
+                "highlighted_evidence": "; ".join(ans["highlighted_evidence"])
+            })
 
 df = pd.DataFrame(rows)
 out_path = "/mnt/Qasper/processed_qasper_df.csv"

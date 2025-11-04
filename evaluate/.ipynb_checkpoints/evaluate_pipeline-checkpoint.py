@@ -8,7 +8,6 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer, util
 import qa_pb2, qa_pb2_grpc
 
-# ---------------- CONFIG ----------------
 ROUTER_ADDR = "qa-router:50050"  
 VARIANTS = ["tinyroberta", "roberta_base", "bert_large"]
 OUTPUT_PATH = "/mnt/results/all_model_results.csv"
@@ -23,7 +22,6 @@ os.makedirs("/mnt/results", exist_ok=True)
 
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-# ---------------- WAITERS ----------------
 def wait_for_datasets():
     print("Waiting for datasets to be ready...")
     max_wait = 200  
@@ -54,7 +52,6 @@ def wait_for_router(addr="qa-router", port=50050, timeout=300):
     return False
 
 
-# ---------------- METRIC ----------------
 def cosine_similarity(prediction, ground_truth):
     if not prediction or not ground_truth:
         return 0.0
@@ -63,10 +60,13 @@ def cosine_similarity(prediction, ground_truth):
     return float(util.cos_sim(emb_pred, emb_gt))
 
 
-# ---------------- CORE EVALUATION ----------------
-def ask_question(stub, question, paper_id, variant, retries=3):
+def ask_question(stub, question, paper_id, variant, context_text="", retries=3):
     metadata = (("variant", variant),)
-    req = qa_pb2.Question(question=question, paper_id=str(paper_id or ""))
+    req = qa_pb2.Question(
+        question=question,
+        context=context_text or "",  
+        paper_id=str(paper_id or "")
+    )
 
     for attempt in range(retries):
         try:
@@ -116,15 +116,25 @@ def evaluate_dataset(name, path, stub):
         df["answer_text"] = df["answer"]
     else:
         df["answer_text"] = ""
+    
+    # Normalize context
+    if "context" in df.columns:
+        df["context"] = df["context"]
+    elif "context" in df.columns:
+        df["context"] = df["context"]
+    else:
+        df["context"] = ""
 
     results = []
     for idx, row in df.head(10).iterrows():  # limit for test run
         q = str(row["question"])
         gt = str(row["answer_text"])
         pid = row["id"] if "id" in row else row.get("paper_id", None)
+        ctx = str(row.get("context", ""))
+        
         for variant in VARIANTS:
             print(f"→ [{variant}] {q[:80]}...")
-            model_out = ask_question(stub, q, pid, variant)
+            model_out = ask_question(stub, q, pid, variant, context_text=ctx)
             model_out["dataset"] = name
             model_out["ground_truth"] = gt
             model_out["cosine_sim"] = cosine_similarity(model_out["answer"], gt)
@@ -132,7 +142,6 @@ def evaluate_dataset(name, path, stub):
     return pd.DataFrame(results)
 
 
-# ---------------- MAIN ----------------
 def main():
     if not wait_for_datasets():
         return
