@@ -130,7 +130,6 @@ services:
       - qasperdata:/mnt/Qasper
       - chromadbdata:/mnt/ChromaDb
       - ./results:/mnt/results
-
 volumes:
   hotpotdata:
   qasperdata:

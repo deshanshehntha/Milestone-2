@@ -8,17 +8,22 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer, util
 import qa_pb2, qa_pb2_grpc
 
-ROUTER_ADDR = "qa-router:50050"  # inside docker network
+# ---------------- CONFIG ----------------
+ROUTER_ADDR = "qa-router:50050"  
 VARIANTS = ["tinyroberta", "roberta_base", "bert_large"]
-OUTPUT_PATH = "results/all_model_results.csv"
+OUTPUT_PATH = "/mnt/results/all_model_results.csv"
+SUMMARY_PATH = "/mnt/results/summary.txt"
+
 DATASETS = {
     "Qasper": "/mnt/Qasper/processed_qasper_df.csv",
     "HotpotQA": "/mnt/HotpotQA/processed_hotpot_df.csv",
 }
 
+os.makedirs("/mnt/results", exist_ok=True)
+
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-
+# ---------------- WAITERS ----------------
 def wait_for_datasets():
     print("Waiting for datasets to be ready...")
     max_wait = 200  
@@ -49,6 +54,7 @@ def wait_for_router(addr="qa-router", port=50050, timeout=300):
     return False
 
 
+# ---------------- METRIC ----------------
 def cosine_similarity(prediction, ground_truth):
     if not prediction or not ground_truth:
         return 0.0
@@ -79,7 +85,7 @@ def ask_question(stub, question, paper_id, variant, retries=3):
                 "client_latency_ms": elapsed,
             }
         except grpc.RpcError as e:
-            print(f"⚠️ gRPC error ({variant}) attempt {attempt+1}: {e.code().name}")
+            print(f" gRPC error ({variant}) attempt {attempt+1}: {e.code().name}")
             time.sleep(5)
     print(f" Failed after {retries} retries for {variant}.")
     return {
@@ -99,11 +105,11 @@ def evaluate_dataset(name, path, stub):
     print(f" Evaluating dataset: {name}")
     df = pd.read_csv(path)
 
-    # Normalize
     if "question" not in df.columns or len(df) == 0:
         print(f"No valid questions found in {name}")
         return None
 
+    # Normalize answers
     if "free_form_answer" in df.columns:
         df["answer_text"] = df["free_form_answer"]
     elif "answer" in df.columns:
@@ -128,8 +134,6 @@ def evaluate_dataset(name, path, stub):
 
 # ---------------- MAIN ----------------
 def main():
-    os.makedirs("results", exist_ok=True)
-
     if not wait_for_datasets():
         return
     if not wait_for_router():
@@ -151,10 +155,22 @@ def main():
     combined = pd.concat(all_results, ignore_index=True)
     combined.to_csv(OUTPUT_PATH, index=False)
 
+    avg_sim = combined["cosine_sim"].mean()
+    avg_conf = combined["confidence"].mean()
+    avg_latency = combined["end_to_end_ms"].mean()
+
     print(f"\n Saved all results to {OUTPUT_PATH}")
-    print("Average Cosine Similarity:", combined["cosine_sim"].mean())
-    print("Average Confidence:", combined["confidence"].mean())
-    print("Average Latency (ms):", combined["end_to_end_ms"].mean())
+    print("Average Cosine Similarity:", avg_sim)
+    print("Average Confidence:", avg_conf)
+    print("Average Latency (ms):", avg_latency)
+
+    # Save quick summary to text file
+    with open(SUMMARY_PATH, "w") as f:
+        f.write(f"Average Cosine Similarity: {avg_sim}\n")
+        f.write(f"Average Confidence: {avg_conf}\n")
+        f.write(f"Average Latency (ms): {avg_latency}\n")
+
+    print(f" Summary saved to {SUMMARY_PATH}")
 
 
 if __name__ == "__main__":
