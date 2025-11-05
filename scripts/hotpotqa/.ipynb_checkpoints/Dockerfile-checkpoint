@@ -12,10 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
         -f https://download.pytorch.org/whl/torch_stable.html && \
     # --- base packages ---
     pip install --no-cache-dir pandas tqdm "datasets<4.0.0" && \
+    # --- huggingface compatibility ---
+    pip install --no-cache-dir huggingface_hub==0.14.1 && \
     # --- vector + embeddings ---
     pip install --no-cache-dir "chromadb[cpu]" sentence-transformers==2.2.2 && \
-    # --- required for text splitting ---
-    pip install --no-cache-dir langchain==0.2.14 && \
+    # --- text splitters ---
+    pip install --no-cache-dir langchain==0.2.14 langchain-experimental==0.0.67 && \
     # --- dataset source ---
     pip install --no-cache-dir kagglehub && \
     # --- cleanup ---
