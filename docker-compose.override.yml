@@ -4,13 +4,14 @@ services:
   # --- TinyRoberta replicas ---
   tinyroberta-1:
     extends:
+      file: ./docker-compose.yml
       service: tinyroberta
     container_name: tinyroberta-1
-    deploy: {}
     cpus: 1.0
 
   tinyroberta-2:
     extends:
+      file: ./docker-compose.yml
       service: tinyroberta
     container_name: tinyroberta-2
     cpus: 1.0
@@ -18,19 +19,22 @@ services:
   # --- Roberta-Base replicas ---
   roberta-base-1:
     extends:
+      file: ./docker-compose.yml
       service: roberta-base
     container_name: roberta-base-1
     cpus: 2.0
 
   roberta-base-2:
     extends:
+      file: ./docker-compose.yml
       service: roberta-base
     container_name: roberta-base-2
     cpus: 2.0
 
-  # --- Bert-Large single heavy instance ---
+  # --- Bert-Large heavy instance ---
   bert-large-1:
     extends:
+      file: ./docker-compose.yml
       service: bert-large
     container_name: bert-large-1
     cpus: 4.0
