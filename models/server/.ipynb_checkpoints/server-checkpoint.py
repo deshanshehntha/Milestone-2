@@ -66,34 +66,80 @@ class QAServicer(qa_pb2_grpc.QAServerServicer):
 
         return model_dir
 
-    async def Answer(self, request, context):
-        t0 = time.perf_counter()
-        # ins = self.tok(request.question, return_tensors="pt", truncation=True, max_length=384)
-        ins = self.tok(
-            request.question,
-            request.context or "",      
-            return_tensors="pt",
-            truncation=True,
-            max_length=384
-        )
-        t1 = time.perf_counter()
-        with torch.no_grad():
-            out = self.mdl(**ins)
-        si, ei = int(out.start_logits.argmax()), int(out.end_logits.argmax())
-        ans = self.tok.decode(ins.input_ids[0, si:ei+1], skip_special_tokens=True)
-        inf_ms = (time.perf_counter() - t1) * 1000
-        e2e_ms = (time.perf_counter() - t0) * 1000
-        conf = float(out.start_logits.softmax(-1)[0, si] * out.end_logits.softmax(-1)[0, ei])
-        print(f"[{self.model_name}] Received Q: {request.question[:80]}...")
-        print(f"[{self.model_name}] Context snippet: {request.context[:120]}...")
-        return qa_pb2.AnswerResponse(
-            answer=ans,
-            confidence=conf,
-            retrieval_ms=0.0,
-            inference_ms=inf_ms,
-            end_to_end_ms=e2e_ms,
-        )
+    # async def Answer(self, request, context):
+    #     t0 = time.perf_counter()
+    #     # ins = self.tok(request.question, return_tensors="pt", truncation=True, max_length=384)
+    #     ins = self.tok(
+    #         request.question,
+    #         request.context or "",      
+    #         return_tensors="pt",
+    #         truncation=True,
+    #         max_length=384
+    #     )
+    #     t1 = time.perf_counter()
+    #     with torch.no_grad():
+    #         out = self.mdl(**ins)
+    #     si, ei = int(out.start_logits.argmax()), int(out.end_logits.argmax())
+    #     ans = self.tok.decode(ins.input_ids[0, si:ei+1], skip_special_tokens=True)
+    #     inf_ms = (time.perf_counter() - t1) * 1000
+    #     e2e_ms = (time.perf_counter() - t0) * 1000
+    #     conf = float(out.start_logits.softmax(-1)[0, si] * out.end_logits.softmax(-1)[0, ei])
+    #     print(f"[{self.model_name}] Received Q: {request.question[:80]}...")
+    #     print(f"[{self.model_name}] Context snippet: {request.context[:120]}...")
+    #     return qa_pb2.AnswerResponse(
+    #         answer=ans,
+    #         confidence=conf,
+    #         retrieval_ms=0.0,
+    #         inference_ms=inf_ms,
+    #         end_to_end_ms=e2e_ms,
+    #     )
 
+    async def Answer(self, request, context):
+            import time
+            t0 = time.perf_counter()
+    
+            # --- tokenize ---
+            t_tok0 = time.perf_counter()
+            ins = self.tok(
+                request.question,
+                request.context or "",            # <-- ensure context is included
+                return_tensors="pt",
+                truncation=True,
+                max_length=384,
+                padding="max_length"
+            )
+            t_tok1 = time.perf_counter()
+    
+            # --- forward ---
+            with torch.no_grad():
+                t_fwd0 = time.perf_counter()
+                out = self.mdl(**ins)
+                t_fwd1 = time.perf_counter()
+    
+            # --- decode ---
+            t_dec0 = time.perf_counter()
+            si = int(out.start_logits.argmax())
+            ei = int(out.end_logits.argmax())
+            ans = self.tok.decode(ins.input_ids[0, si:ei+1], skip_special_tokens=True)
+            # confidence = P(start=si)*P(end=ei)
+            conf = float(out.start_logits.softmax(-1)[0, si] * out.end_logits.softmax(-1)[0, ei])
+            t_dec1 = time.perf_counter()
+    
+            # timings
+            tokenize_ms = (t_tok1 - t_tok0) * 1000.0
+            forward_ms  = (t_fwd1 - t_fwd0) * 1000.0
+            decode_ms   = (t_dec1 - t_dec0) * 1000.0
+            e2e_ms      = (time.perf_counter() - t0) * 1000.0
+    
+            print(f"[{self.model_name}] tokenize={tokenize_ms:.1f}ms forward={forward_ms:.1f}ms decode={decode_ms:.1f}ms e2e={e2e_ms:.1f}ms", flush=True)
+    
+            return qa_pb2.AnswerResponse(
+                answer=ans,
+                confidence=conf,
+                retrieval_ms=tokenize_ms,  # repurpose field for tokenize time
+                inference_ms=forward_ms,
+                end_to_end_ms=e2e_ms,
+            )
 
 async def serve():
     port = int(os.environ.get("PORT", "50051"))

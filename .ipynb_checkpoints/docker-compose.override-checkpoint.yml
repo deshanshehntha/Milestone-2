@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  # --- TinyRoberta replicas ---
+  tinyroberta-1:
+    extends:
+      service: tinyroberta
+    container_name: tinyroberta-1
+    deploy: {}
+    cpus: 1.0
+
+  tinyroberta-2:
+    extends:
+      service: tinyroberta
+    container_name: tinyroberta-2
+    cpus: 1.0
+
+  # --- Roberta-Base replicas ---
+  roberta-base-1:
+    extends:
+      service: roberta-base
+    container_name: roberta-base-1
+    cpus: 2.0
+
+  roberta-base-2:
+    extends:
+      service: roberta-base
+    container_name: roberta-base-2
+    cpus: 2.0
+
+  # --- Bert-Large single heavy instance ---
+  bert-large-1:
+    extends:
+      service: bert-large
+    container_name: bert-large-1
+    cpus: 4.0
+
+  # --- Router aware of replicas ---
+  router:
+    environment:
+      BACKENDS_TINYROBERTA: "tinyroberta-1:50051,tinyroberta-2:50051"
+      BACKENDS_ROBERTA_BASE: "roberta-base-1:50051,roberta-base-2:50051"
+      BACKENDS_BERT_LARGE: "bert-large-1:50051"

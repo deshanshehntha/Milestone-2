@@ -138,6 +138,9 @@ def evaluate_dataset(name, path, stub):
             model_out["dataset"] = name
             model_out["ground_truth"] = gt
             model_out["cosine_sim"] = cosine_similarity(model_out["answer"], gt)
+            model_out["overhead_ms"] = max(0.0,
+            model_out["end_to_end_ms"] - model_out["inference_ms"] - model_out["retrieval_ms"]
+            )
             results.append(model_out)
     return pd.DataFrame(results)
 
@@ -163,6 +166,11 @@ def main():
 
     combined = pd.concat(all_results, ignore_index=True)
     combined.to_csv(OUTPUT_PATH, index=False)
+
+    summary = combined.groupby("variant")[["retrieval_ms","inference_ms","end_to_end_ms","overhead_ms"]].mean().round(2)
+    summary.to_csv("/mnt/results/latency_breakdown_by_variant.csv")
+    print(summary)
+
 
     avg_sim = combined["cosine_sim"].mean()
     avg_conf = combined["confidence"].mean()
