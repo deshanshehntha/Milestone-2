@@ -1,23 +1,43 @@
-version: "3.9"
-
 services:
+
   prepare-hotpotqa:
     build:
       context: ./scripts/hotpotqa
       dockerfile: Dockerfile
     container_name: prepare-hotpotqa
+    depends_on:
+      - chroma
     volumes:
       - hotpotdata:/mnt/HotpotQA
-      - chromadbdata:/mnt/ChromaDb
-
+      - chromadbdata:/chroma   
   prepare-qasper:
     build:
       context: ./scripts/qasper
       dockerfile: Dockerfile
     container_name: prepare-qasper
+    depends_on:
+      - chroma
     volumes:
       - qasperdata:/mnt/Qasper
-      - chromadbdata:/mnt/ChromaDb
+      - chromadbdata:/chroma  
+
+
+
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: chroma-server
+    ports:
+      - "8000:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+      - CHROMA_DB_IMPL=duckdb+parquet
+      - CHROMA_PERSIST_DIRECTORY=/chroma
+      - ANONYMIZED_TELEMETRY=False
+    volumes:
+      - chromadbdata:/chroma   
+
+
+
   minio:
     image: minio/minio:latest
     container_name: minio
@@ -26,11 +46,12 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
-      MINIO_DISK_THRESHOLD_PERCENTAGE: 1  # allow usage up to 99% disk
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+      - MINIO_DISK_THRESHOLD_PERCENTAGE=1
     volumes:
       - minio_data:/data
+
   setup-minio:
     build:
       context: ./minio
@@ -45,17 +66,6 @@ services:
     volumes:
       - ./downloaded_models:/downloaded_models
     command: ["python", "setup_minio.py"]
-  chroma:
-    image: chromadb/chroma:latest
-    container_name: chroma-server
-    ports:
-      - "8000:8000"
-    environment:
-      - IS_PERSISTENT=TRUE
-      - CHROMA_DB_IMPL=duckdb+parquet
-      - ANONYMIZED_TELEMETRY=False
-    volumes:
-      - chromadbdata:/chroma
 
 
 
@@ -107,6 +117,8 @@ services:
     depends_on:
       - setup-minio
 
+
+
   router:
     build:
       context: ./router
@@ -123,7 +135,9 @@ services:
       - roberta-base
       - bert-large
     volumes:
-      - chromadbdata:/mnt/ChromaDb
+      - chromadbdata:/chroma
+
+
 
   evaluate-pipeline:
     build:
@@ -139,11 +153,14 @@ services:
     volumes:
       - hotpotdata:/mnt/HotpotQA
       - qasperdata:/mnt/Qasper
-      - chromadbdata:/mnt/ChromaDb
+      - chromadbdata:/chroma
       - ./results:/mnt/results
+
+
+
   jupyter:
     image: jupyter/scipy-notebook:python-3.10
-    user: root                  
+    user: root
     container_name: milestone2-jupyter
     ports:
       - "8888:8888"
@@ -154,6 +171,7 @@ services:
       - ./results:/home/jovyan/results
       - ./notebooks:/home/jovyan/notebooks
     working_dir: /home/jovyan/notebooks
+
 
 
 volumes:
