@@ -13,7 +13,7 @@ from tqdm import tqdm
 os.makedirs("/mnt/Qasper", exist_ok=True)
 os.makedirs("/mnt/ChromaDb", exist_ok=True)
 
-print("📥 Loading QASPER dataset from HuggingFace...")
+print(" Loading QASPER dataset from HuggingFace...")
 qasper_ds = load_dataset("allenai/qasper", split="train")
 
 rows = []
@@ -52,7 +52,7 @@ for paper in qasper_ds:
 df = pd.DataFrame(rows)
 out_path = "/mnt/Qasper/processed_qasper_df.csv"
 df.to_csv(out_path, index=False)
-print(f"✅ Saved {len(df)} QASPER entries to {out_path}")
+print(f"Saved {len(df)} QASPER entries to {out_path}")
 
 # --- Config ---
 TOKEN_CHUNK_SIZE = 256
@@ -68,13 +68,13 @@ for attempt in range(10):
             port=8000,
             settings=Settings(allow_reset=True)
         )
-        print("✅ Connected to Chroma server.")
+        print("Connected to Chroma server.")
         break
     except Exception:
-        print(f"⏳ Waiting for Chroma to be ready (attempt {attempt+1}/10)...")
+        print(f" Waiting for Chroma to be ready (attempt {attempt+1}/10)...")
         time.sleep(5)
 else:
-    raise ConnectionError("❌ Could not connect to Chroma server after 10 attempts.")
+    raise ConnectionError("Could not connect to Chroma server after 10 attempts.")
 
 embedding_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
 collection = chroma_client.get_or_create_collection(
@@ -95,7 +95,7 @@ token_splitter = SentenceTransformersTokenTextSplitter(
 
 
 def ingest_qasper_to_chroma(qasper_df, chroma_collection, character_splitter, token_splitter):
-    for paper_id, group in tqdm(qasper_df.groupby("paper_id"), desc="📚 Processing QASPER"):
+    for paper_id, group in tqdm(qasper_df.groupby("paper_id"), desc="Processing QASPER"):
         full_text = str(group.iloc[0]["context"])
         char_chunks = character_splitter.split_text(full_text)
         token_chunks = []
@@ -103,7 +103,7 @@ def ingest_qasper_to_chroma(qasper_df, chroma_collection, character_splitter, to
             token_chunks.extend(token_splitter.split_text(chunk))
 
         if not token_chunks:
-            print(f"⚠️ Skipping {paper_id}: no chunks generated.")
+            print(f"Skipping {paper_id}: no chunks generated.")
             continue
 
         ids = [f"{paper_id}_{i}" for i in range(len(token_chunks))]
@@ -115,7 +115,7 @@ def ingest_qasper_to_chroma(qasper_df, chroma_collection, character_splitter, to
             metadatas=metadatas
         )
 
-    print("✅ All QASPER documents embedded and stored in Chroma.")
+    print(" All QASPER documents embedded and stored in Chroma.")
 
 
 if __name__ == "__main__":

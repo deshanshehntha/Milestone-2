@@ -14,9 +14,9 @@ from tqdm import tqdm
 os.makedirs("/mnt/HotpotQA", exist_ok=True)
 os.makedirs("/mnt/ChromaDb", exist_ok=True)
 
-print("📥 Downloading HotpotQA dataset via KaggleHub...")
+print("Downloading HotpotQA dataset via KaggleHub...")
 path = kagglehub.dataset_download("jeromeblanchet/hotpotqa-question-answering-dataset")
-print(f"✅ Path to HotpotQA dataset: {path}")
+print(f"Path to HotpotQA dataset: {path}")
 
 json_path = os.path.join(path, "hotpot_dev_distractor_v1.json")
 if not os.path.exists(json_path):
@@ -25,7 +25,7 @@ if not os.path.exists(json_path):
 with open(json_path, "r") as f:
     hotpot_data = json.load(f)
 
-print(f"✅ Loaded {len(hotpot_data)} examples")
+print(f"Loaded {len(hotpot_data)} examples")
 
 rows = []
 for ex in hotpot_data:
@@ -40,7 +40,7 @@ for ex in hotpot_data:
 df = pd.DataFrame(rows)
 out_csv = "/mnt/HotpotQA/processed_hotpot_df.csv"
 df.to_csv(out_csv, index=False)
-print(f"✅ Saved processed HotpotQA CSV to {out_csv}")
+print(f" Saved processed HotpotQA CSV to {out_csv}")
 
 # --- Config ---
 TOKEN_CHUNK_SIZE = 256
@@ -57,13 +57,13 @@ for attempt in range(10):
             port=8000,
             settings=Settings(allow_reset=True)
         )
-        print("✅ Connected to Chroma server.")
+        print("Connected to Chroma server.")
         break
     except Exception as e:
-        print(f"⏳ Waiting for Chroma to be ready (attempt {attempt+1}/10)...")
+        print(f" Waiting for Chroma to be ready (attempt {attempt+1}/10)...")
         time.sleep(5)
 else:
-    raise ConnectionError("❌ Could not connect to Chroma server after 10 attempts.")
+    raise ConnectionError("Could not connect to Chroma server after 10 attempts.")
 
 embedding_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
 collection = chroma_client.get_or_create_collection(
@@ -84,7 +84,7 @@ token_splitter = SentenceTransformersTokenTextSplitter(
 
 
 def ingest_hotpot_to_chroma(hotpot_df, chroma_collection, character_splitter, token_splitter):
-    for q_id, group in tqdm(hotpot_df.groupby("id"), desc="📚 Processing HotpotQA"):
+    for q_id, group in tqdm(hotpot_df.groupby("id"), desc=" Processing HotpotQA"):
         context_blocks = []
         for title, paragraphs in group.iloc[0]["context"]:
             section_text = "\n".join(paragraphs)
@@ -97,7 +97,7 @@ def ingest_hotpot_to_chroma(hotpot_df, chroma_collection, character_splitter, to
             token_chunks.extend(token_splitter.split_text(chunk))
 
         if not token_chunks:
-            print(f"⚠️ Skipping {q_id}: no chunks generated.")
+            print(f" Skipping {q_id}: no chunks generated.")
             continue
 
         ids = [f"{q_id}_{i}" for i in range(len(token_chunks))]
@@ -109,7 +109,7 @@ def ingest_hotpot_to_chroma(hotpot_df, chroma_collection, character_splitter, to
             metadatas=metadatas
         )
 
-    print("✅ All HotpotQA documents embedded and stored in Chroma.")
+    print(" All HotpotQA documents embedded and stored in Chroma.")
 
 
 if __name__ == "__main__":

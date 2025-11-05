@@ -7,13 +7,18 @@ WORKDIR /app
 COPY prepare_hotpot.py ./
 
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
-    # --- install CPU-only torch before sentence-transformers ---
+    # --- install CPU-only torch first ---
     pip install --no-cache-dir torch==2.3.0+cpu torchvision==0.18.0+cpu \
         -f https://download.pytorch.org/whl/torch_stable.html && \
+    # --- base packages ---
     pip install --no-cache-dir pandas tqdm "datasets<4.0.0" && \
-    pip install --no-cache-dir "chromadb[cpu]" && \
-    pip install --no-cache-dir sentence-transformers==2.2.2 && \
+    # --- vector + embeddings ---
+    pip install --no-cache-dir "chromadb[cpu]" sentence-transformers==2.2.2 && \
+    # --- required for text splitting ---
+    pip install --no-cache-dir langchain==0.2.14 langchain-experimental==0.0.67 && \
+    # --- dataset source ---
     pip install --no-cache-dir kagglehub && \
+    # --- cleanup ---
     apt-get remove -y build-essential && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 CMD ["python", "prepare_hotpot.py"]
