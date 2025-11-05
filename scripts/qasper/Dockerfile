@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     # --- pin compatible Hugging Face versions ---
     pip install --no-cache-dir huggingface-hub==0.14.1 sentence-transformers==2.2.2 && \
     # --- install Chroma and LangChain ---
-    pip install --no-cache-dir "chromadb[cpu]" langchain==0.2.14 langchain-experimental==0.0.67 && \
+    pip install --no-cache-dir "chromadb[cpu]" langchain==0.2.14  && \
     # --- dataset downloader ---
     pip install --no-cache-dir kagglehub && \
     # --- clean up ---
