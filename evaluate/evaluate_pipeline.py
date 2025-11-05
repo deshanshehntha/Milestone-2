@@ -227,7 +227,7 @@ def evaluate_dataset(name, path, stub, collections):
     results = []
     chroma_coll = collections.get(name)
 
-    for idx, row in df.head(10).iterrows():  # limit for test run
+    for idx, row in df.iterrows():  # limit for test run
         q = str(row["question"])
         gt = str(row["answer_text"])
         pid = str(row[id_field]) if id_field and id_field in row else None
