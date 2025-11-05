@@ -45,8 +45,7 @@ class QAServicer(qa_pb2_grpc.QAServerServicer):
             print(f" MinIO unavailable or model not found: {e}")
             print(f" Downloading {self.model_id} from Hugging Face...")
 
-        # ---------------------------------------------------------------------
-        # Fall back to Hugging Face, then upload to MinIO for caching
+  
         model_dir = tempfile.mkdtemp()
         mdl = AutoModelForQuestionAnswering.from_pretrained(self.model_id)
         tok = AutoTokenizer.from_pretrained(self.model_id)
@@ -67,7 +66,6 @@ class QAServicer(qa_pb2_grpc.QAServerServicer):
 
         return model_dir
 
-    # -------------------------------------------------------------------------
     async def Answer(self, request, context):
         t0 = time.perf_counter()
         # ins = self.tok(request.question, return_tensors="pt", truncation=True, max_length=384)
@@ -86,6 +84,8 @@ class QAServicer(qa_pb2_grpc.QAServerServicer):
         inf_ms = (time.perf_counter() - t1) * 1000
         e2e_ms = (time.perf_counter() - t0) * 1000
         conf = float(out.start_logits.softmax(-1)[0, si] * out.end_logits.softmax(-1)[0, ei])
+        print(f"[{self.model_name}] Received Q: {request.question[:80]}...")
+        print(f"[{self.model_name}] Context snippet: {request.context[:120]}...")
         return qa_pb2.AnswerResponse(
             answer=ans,
             confidence=conf,
