@@ -18,19 +18,6 @@ services:
     volumes:
       - qasperdata:/mnt/Qasper
       - chromadbdata:/mnt/ChromaDb
-
-  # minio:
-  #   image: minio/minio:latest
-  #   container_name: minio
-  #   command: server /data --console-address ":9001"
-  #   ports:
-  #     - "9000:9000"   # API endpoint
-  #     - "9001:9001"   # Web console
-  #   environment:
-  #     MINIO_ROOT_USER: minioadmin
-  #     MINIO_ROOT_PASSWORD: minioadmin123
-  #   volumes:
-  #     - minio_data:/data
   minio:
     image: minio/minio:latest
     container_name: minio
@@ -58,6 +45,18 @@ services:
     volumes:
       - ./downloaded_models:/downloaded_models
     command: ["python", "setup_minio.py"]
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: chroma-server
+    ports:
+      - "8000:8000"        # REST API port
+    environment:
+      - IS_PERSISTENT=TRUE
+      - CHROMA_DB_IMPL=duckdb+parquet
+      - ANONYMIZED_TELEMETRY=False
+    volumes:
+      - chromadbdata:/mnt/ChromaDb
+    command: ["--path", "/mnt/ChromaDb"]
 
 
   tinyroberta:

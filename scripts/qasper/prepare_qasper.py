@@ -70,25 +70,70 @@ out_path = "/mnt/Qasper/processed_qasper_df.csv"
 df.to_csv(out_path, index=False)
 print(f"Saved {len(df)} QASPER papers to {out_path}")
 
-# # --- Create ChromaDB collection ---
-# print(" Building ChromaDB collection for QASPER...")
-# chroma_client = chromadb.PersistentClient(path="/mnt/ChromaDb")
-# collection_name = "qasper_data_collection"
+DATASET_QASPER = "Qasper"
 
-# try:
-#     chroma_client.delete_collection(collection_name)
-#     print(f"Old collection '{collection_name}' deleted.")
-# except Exception:
-#     pass
+TOKEN_CHUNK_SIZE = 256
+TOKEN_CHUNK_OVERLAP = 10
 
-# embedding_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-# collection = chroma_client.create_collection(name=collection_name, embedding_function=embedding_fn)
+CHAR_CHUNK_SIZE = 1000
+CHAR_CHUNK_OVERLAP = 10
 
-# for _, row in tqdm(df.iterrows(), total=len(df), desc="Embedding QASPER"):
-#     text = str(row["text"])
-#     chunks = [text[i:i + 1000] for i in range(0, len(text), 1000)]
-#     ids = [f"{row['paper_id']}_{i}" for i in range(len(chunks))]
-#     metadatas = [{"paper_id": row["paper_id"]} for _ in chunks]
-#     collection.add(documents=chunks, ids=ids, metadatas=metadatas)
+# Connect to the Chroma server
+chroma_client = chromadb.HttpClient(
+    host="chroma",
+    port=8000,
+    settings=Settings(allow_reset=True)
+)
 
-# print(f" ChromaDB QASPER collection '{collection_name}' ready at /mnt/ChromaDb")
+embedding_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+collection = chroma_client.get_or_create_collection(
+    name="qasper_data_collection",
+    embedding_function=embedding_fn
+)
+
+character_splitter = RecursiveCharacterTextSplitter(
+    separators=["\n\n", "\n", ". ", " ", ""],
+    chunk_size=CHAR_CHUNK_SIZE,
+    chunk_overlap=CHAR_CHUNK_OVERLAP
+)
+
+token_splitter = SentenceTransformersTokenTextSplitter(
+    chunk_overlap=TOKEN_CHUNK_OVERLAP,
+    tokens_per_chunk=TOKEN_CHUNK_SIZE
+)
+
+def ingest_qasper_to_chroma(qasper_df, chroma_collection, character_splitter, token_splitter):
+    for paper_id, group in tqdm(qasper_df.groupby("paper_id")):
+        full_text = str(group.iloc[0]["full_text"])
+    
+        char_chunks = character_splitter.split_text(full_text)
+    
+        token_chunks = []
+        for chunk in char_chunks:
+            token_chunks.extend(token_splitter.split_text(chunk))
+    
+        if not token_chunks:
+            print(f"Skipping paper {paper_id}: no chunks produced.")
+            continue
+        
+        ids = [f"{paper_id}_{i}" for i in range(len(token_chunks))]
+        question_ids = group["question_id"].tolist()
+        metadatas = [
+            {
+                "paper_id": paper_id,
+                "question_ids": ",".join(question_ids),
+            }
+            for _ in token_chunks
+        ]
+    
+        chroma_collection.add(
+            documents=token_chunks,
+            ids=ids,
+            metadatas=metadatas
+        )
+    
+    print("All papers processed and stored in Chroma.")
+
+
+ingest_qasper_to_chroma(df, collection, character_splitter, token_splitter)
+

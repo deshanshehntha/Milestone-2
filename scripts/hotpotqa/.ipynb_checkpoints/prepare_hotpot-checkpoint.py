@@ -38,19 +38,79 @@ out_csv = "/mnt/HotpotQA/processed_hotpot_df.csv"
 df.to_csv(out_csv, index=False)
 print(f"Saved processed HotpotQA CSV to {out_csv}")
 
-# # --- Create ChromaDB collection ---
-# print(" Building ChromaDB collection for HotpotQA...")
-# chroma_client = chromadb.PersistentClient(path="/mnt/ChromaDb")
-# collection_name = "hpqa_data_collection"
 
-# try:
-#     chroma_client.delete_collection(collection_name)
-#     print(f"Old collection '{collection_name}' deleted.")
-# except Exception:
-#     pass
+DATASET_HOTPOT = "HotpotQA"
 
-# embedding_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-# collection = chroma_client.create_collection(name=collection_name, embedding_function=embedding_fn)
+TOKEN_CHUNK_SIZE = 256
+TOKEN_CHUNK_OVERLAP = 10
+
+CHAR_CHUNK_SIZE = 1000
+CHAR_CHUNK_OVERLAP = 10
+
+
+# Connect to the Chroma server
+chroma_client = chromadb.HttpClient(
+    host="chroma",
+    port=8000,
+    settings=Settings(allow_reset=True)
+)
+
+embedding_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+collection = chroma_client.get_or_create_collection(
+    name="hotpotqa_data_collection",
+    embedding_function=embedding_fn
+)
+
+character_splitter = RecursiveCharacterTextSplitter(
+    separators=["\n\n", "\n", ". ", " ", ""],
+    chunk_size=CHAR_CHUNK_SIZE,
+    chunk_overlap=CHAR_CHUNK_OVERLAP
+)
+
+token_splitter = SentenceTransformersTokenTextSplitter(
+    chunk_overlap=TOKEN_CHUNK_OVERLAP,
+    tokens_per_chunk=TOKEN_CHUNK_SIZE
+)
+
+
+
+def ingest_hotpot_to_chroma(hotpot_df, chroma_collection, character_splitter, token_splitter):
+
+    for q_id, group in tqdm(hotpot_df.groupby("id"), desc="Processing Hotpot QA"):
+
+        context_blocks = []
+        for title, paragraphs in group.iloc[0]["context"]:
+            section_text = "\n".join(paragraphs)
+            context_blocks.append(f"{title}\n{section_text}")
+        full_text = "\n\n".join(context_blocks)
+        char_chunks = character_splitter.split_text(full_text)
+
+        token_chunks = []
+        for chunk in char_chunks:
+            token_chunks.extend(token_splitter.split_text(chunk))
+
+        if not token_chunks:
+            print(f"Skipping question {q_id}: no context found produced.")
+            continue
+
+        ids = [f"{q_id}_{i}" for i in range(len(token_chunks))]
+        
+        metadatas = [
+            {
+                "hotpot_id": q_id
+            }
+            for _ in token_chunks
+        ]
+
+        chroma_collection.add(
+            documents=token_chunks,
+            ids=ids,
+            metadatas=metadatas
+        )
+
+    print("All HotpotQA questions processed and stored in Chroma.")
+
+ingest_hotpot_to_chroma(df, collection, character_splitter, token_splitter)
 
 # for _, row in tqdm(df.iterrows(), total=len(df), desc="Embedding HotpotQA"):
 #     context_blocks = []
