@@ -2,7 +2,8 @@ FROM python:3.10-slim
 
 ENV PIP_NO_CACHE_DIR=1
 ENV TORCH_DISABLE_CUDA=1
-ENV PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu   # Force CPU-only builds
+# Force CPU-only builds for torch
+ENV PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
 
 WORKDIR /app
 COPY prepare_qasper.py ./
