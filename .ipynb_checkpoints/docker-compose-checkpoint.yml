@@ -130,6 +130,21 @@ services:
       - qasperdata:/mnt/Qasper
       - chromadbdata:/mnt/ChromaDb
       - ./results:/mnt/results
+  jupyter:
+    image: jupyter/scipy-notebook:python-3.10
+    container_name: milestone2-jupyter
+    ports:
+      - "8888:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=milestone2
+    volumes:
+      - ./results:/home/jovyan/results
+      - ./notebooks:/home/jovyan/notebooks
+    working_dir: /home/jovyan/notebooks
+    depends_on:
+      - evaluate-pipeline
+
 volumes:
   hotpotdata:
   qasperdata:
