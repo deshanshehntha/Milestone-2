@@ -49,14 +49,14 @@ services:
     image: chromadb/chroma:latest
     container_name: chroma-server
     ports:
-      - "8000:8000"        # REST API port
+      - "8000:8000"
     environment:
       - IS_PERSISTENT=TRUE
       - CHROMA_DB_IMPL=duckdb+parquet
       - ANONYMIZED_TELEMETRY=False
     volumes:
-      - chromadbdata:/mnt/ChromaDb
-    command: ["--path", "/mnt/ChromaDb"]
+      - chromadbdata:/chroma
+
 
 
   tinyroberta:
