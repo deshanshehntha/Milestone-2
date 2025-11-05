@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     # --- vector + embeddings ---
     pip install --no-cache-dir "chromadb[cpu]" sentence-transformers==2.2.2 && \
     # --- required for text splitting ---
-    pip install --no-cache-dir langchain==0.2.14 langchain-experimental==0.0.67 && \
+    pip install --no-cache-dir langchain==0.2.14 && \
     # --- dataset source ---
     pip install --no-cache-dir kagglehub && \
     # --- cleanup ---

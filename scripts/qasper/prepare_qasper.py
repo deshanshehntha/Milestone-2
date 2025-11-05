@@ -5,8 +5,7 @@ from datasets import load_dataset
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_experimental.text_splitter import SentenceTransformersTokenTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter, SentenceTransformersTokenTextSplitter
 from tqdm import tqdm
 
 # --- Setup paths ---

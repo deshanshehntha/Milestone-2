@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
         -f https://download.pytorch.org/whl/torch_stable.html && \
     pip install --no-cache-dir pandas tqdm "datasets<4.0.0" && \
     pip install --no-cache-dir "chromadb[cpu]" sentence-transformers==2.2.2 && \
-    pip install --no-cache-dir langchain==0.2.14 langchain-experimental==0.0.67 && \
+    pip install --no-cache-dir langchain==0.2.14  && \
     pip install --no-cache-dir kagglehub && \
     apt-get remove -y build-essential && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
