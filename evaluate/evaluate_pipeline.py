@@ -14,13 +14,14 @@ MULTI-COLLECTION EVALUATION (Docker)
 Env vars:
   CHROMA_DB_PATH=/chromadb
   ROUTER_ADDR=qa-router:50050
-  MODELS="qwen-3b, qwen-1.5b"
+  MODELS="llama3,qwen2_5,mistral"
   TOP_K=6
   RESTRICT_TO_SAME_QUESTION=1
   MAX_SAMPLES=10 (or "None")
   EMBED_MODEL=all-MiniLM-L6-v2
-  EVAL_COLLECTIONS="hotpotqa,narrativeqa"   # optional: restrict to subset
-  RAG_DEBUG=1  # optional: print retrieval filter + context preview
+  EVAL_COLLECTIONS="hotpotqa,narrativeqa"   # optional
+  RAG_DEBUG=1  # optional
+  GRPC_TIMEOUT_S=180
 """
 
 import os
@@ -45,22 +46,35 @@ import qa_pb2_grpc
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "/chromadb")
 
 ROUTER_ADDR = os.getenv("ROUTER_ADDR", "qa-router:50050")
-MODELS = [m.strip() for m in os.getenv("MODELS", "qwen-3b, qwen-1.5b").split(",") if m.strip()]
+
+# UPDATED DEFAULT MODELS (router variant keys)
+MODELS = [
+    m.strip()
+    for m in os.getenv("MODELS", "llama3,qwen2_5,mistral").split(",")
+    if m.strip()
+]
 
 RESULTS_PATH = os.getenv("RESULTS_PATH", "/data/results")
 
 TOP_K = int(os.getenv("TOP_K", "6"))
 RESTRICT_TO_SAME_QUESTION = os.getenv("RESTRICT_TO_SAME_QUESTION", "1") == "1"
 
-MAX_SAMPLES = os.getenv("MAX_SAMPLES", "10")  # "None" or integer
+MAX_SAMPLES = os.getenv("MAX_SAMPLES", "100")  # "None" or integer
 MAX_SAMPLES = None if str(MAX_SAMPLES).lower() == "none" else int(MAX_SAMPLES)
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 
 EVAL_COLLECTIONS = os.getenv("EVAL_COLLECTIONS", "").strip()
-EVAL_COLLECTIONS = [c.strip() for c in EVAL_COLLECTIONS.split(",") if c.strip()] if EVAL_COLLECTIONS else None
+EVAL_COLLECTIONS = (
+    [c.strip() for c in EVAL_COLLECTIONS.split(",") if c.strip()]
+    if EVAL_COLLECTIONS
+    else None
+)
 
 RAG_DEBUG = os.getenv("RAG_DEBUG", "0") == "1"
+
+# NEW: longer default timeout for Ollama
+GRPC_TIMEOUT_S = int(os.getenv("GRPC_TIMEOUT_S", "180"))
 
 
 # -----------------------------
@@ -138,12 +152,12 @@ def load_questions_from_chroma(collection, limit=None) -> pd.DataFrame:
         rows.append(
             {
                 "id": qid,
-                "story_id": str(m.get("story_id", "")).strip(),   # ✅ added
+                "story_id": str(m.get("story_id", "")).strip(),
                 "question": str(m.get("question", "")).strip(),
                 "answer": str(m.get("answer", "")).strip(),
                 "type": str(m.get("type", "")),
                 "level": str(m.get("level", "")),
-                "dataset": str(m.get("dataset", "")),
+                "dataset": str(m.get("dataset", "")).strip().lower(),  # normalized
             }
         )
         if limit and len(rows) >= limit:
@@ -192,7 +206,6 @@ def build_context_from_chroma(
     parts = []
     for d, m in zip(docs, metas):
         ci = m.get("chunk_index", "")
-        # include IDs for debugging confidence that filter worked
         sid = m.get("story_id", "")
         qid = m.get("question_id", "")
         parts.append(f"[chunk {ci}] story_id={sid} question_id={qid}\n{d}")
@@ -225,7 +238,10 @@ def evaluate_collection(collection_name: str, collection, stub) -> pd.DataFrame:
         return pd.DataFrame()
 
     total_q = len(df_questions)
-    print(f"Evaluating {total_q} questions x {len(MODELS)} models (k={TOP_K}, restrict={RESTRICT_TO_SAME_QUESTION})")
+    print(
+        f"Evaluating {total_q} questions x {len(MODELS)} models "
+        f"(k={TOP_K}, restrict={RESTRICT_TO_SAME_QUESTION}, timeout={GRPC_TIMEOUT_S}s)"
+    )
 
     answer_embedder = SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
 
@@ -239,7 +255,7 @@ def evaluate_collection(collection_name: str, collection, stub) -> pd.DataFrame:
         true_answer = str(row.get("answer", "")).strip()
         q_type = str(row.get("type", ""))
         q_level = str(row.get("level", ""))
-        dataset = str(row.get("dataset", ""))
+        dataset = str(row.get("dataset", "")).strip().lower()
 
         context = build_context_from_chroma(
             collection,
@@ -262,10 +278,13 @@ def evaluate_collection(collection_name: str, collection, stub) -> pd.DataFrame:
                 start = time.time()
                 resp = stub.Answer(
                     req,
-                    metadata=[("variant", model_variant)],
-                    timeout=60,
+                    metadata=[
+                        ("variant", model_variant),      # router variant key
+                        ("dataset", dataset),            # helpful now + later
+                    ],
+                    timeout=GRPC_TIMEOUT_S,
                 )
-                elapsed_ms = (time.time() - start) * 1000
+                elapsed_ms = (time.time() - start) * 1000.0
 
                 pred_answer = resp.answer or ""
                 pred_vec = (
@@ -281,7 +300,7 @@ def evaluate_collection(collection_name: str, collection, stub) -> pd.DataFrame:
                     {
                         "collection": collection_name,
                         "dataset": dataset,
-                        "story_id": story_id,        # ✅ added
+                        "story_id": story_id,
                         "question_id": qid,
                         "question": question,
                         "true_answer": true_answer,
@@ -354,6 +373,7 @@ def save_results_for_collection(collection_name: str, df_results: pd.DataFrame):
         f.write(f"TOP_K: {TOP_K}\n")
         f.write(f"RESTRICT_TO_SAME_QUESTION: {RESTRICT_TO_SAME_QUESTION}\n")
         f.write(f"EMBED_MODEL: {EMBED_MODEL}\n")
+        f.write(f"GRPC_TIMEOUT_S: {GRPC_TIMEOUT_S}\n")
         f.write(f"Rows: {len(df_results)}\n\n")
 
         for model in MODELS:

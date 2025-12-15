@@ -1,92 +1,132 @@
+version: "3.9"
+
 services:
-  minio:
-    image: minio/minio:latest
-    container_name: minio
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+  # -------------------------
+  # Ollama (persist models on /data)
+  # -------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+
+    # ✅ GPU access (Compose v3.9-compatible)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin123
-      - MINIO_DISK_THRESHOLD_PERCENTAGE=95
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      # Optional:
+      # OLLAMA_CONTEXT_LENGTH: "4096"
+
     volumes:
-      - /data/minio_data:/data
+      - /data/ollama:/root/.ollama
+
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/ready > /dev/null || exit 1"]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 30
 
-  setup-minio:
-    build:
-      context: ./minio
-      dockerfile: Dockerfile
-    container_name: setup-minio
+    restart: unless-stopped
+
+  # Pull models once (so servers don't race on first run)
+  setup-ollama:
+    image: ollama/ollama:latest
+    container_name: setup-ollama
     depends_on:
-      minio:
+      ollama:
         condition: service_healthy
+
+    # ✅ GPU access (not required for pulling, but harmless)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+
     environment:
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin123
+      OLLAMA_HOST: http://ollama:11434
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+    entrypoint: ["/bin/sh", "-lc"]
+    command: >
+      "ollama pull llama3 &&
+       ollama pull qwen2.5 &&
+       ollama pull mistral"
+
     volumes:
-      - /data/downloaded_models:/downloaded_models
+      - /data/ollama:/root/.ollama
+
     restart: "no"
 
-  qwen-3b:
+  # -------------------------
+  # Ollama-backed gRPC model servers
+  # -------------------------
+  ollama-llama3:
     build:
       context: ./models/server
       dockerfile: Dockerfile
-    container_name: qwen-3b
+    container_name: ollama-llama3
     expose:
       - "50051"
     environment:
-      - MODEL_NAME=qwen-3b
-      - MODEL_ID=Qwen/Qwen2.5-3B-Instruct
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin123
+      MODEL_NAME: ollama-llama3
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: llama3
+      MAX_NEW_TOKENS: "128"
+      OLLAMA_TIMEOUT_S: "180"
     depends_on:
-      setup-minio:
+      setup-ollama:
         condition: service_completed_successfully
+    restart: unless-stopped
 
-
-
-  # llama-3.2-3b:
-  #   build:
-  #     context: ./models/server
-  #     dockerfile: Dockerfile
-  #   container_name: llama-3.2-3b
-  #   expose:
-  #     - "50051"
-  #   environment:
-  #     - MODEL_NAME=llama-3.2-3b
-  #     - MODEL_ID=meta-llama/Llama-3.2-3B-Instruct
-  #     - MINIO_ENDPOINT=minio:9000
-  #     - MINIO_ACCESS_KEY=minioadmin
-  #     - MINIO_SECRET_KEY=minioadmin123
-  #   depends_on:
-  #     setup-minio:
-  #       condition: service_completed_successfully
-
-  qwen-1.5b:
+  ollama-qwen:
     build:
       context: ./models/server
       dockerfile: Dockerfile
-    container_name: qwen-1.5b
+    container_name: ollama-qwen
     expose:
       - "50051"
     environment:
-      - MODEL_NAME=qwen-1.5b
-      - MODEL_ID=Qwen/Qwen2.5-1.5B-Instruct
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin123
+      MODEL_NAME: ollama-qwen
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: qwen2.5
+      MAX_NEW_TOKENS: "128"
+      OLLAMA_TIMEOUT_S: "180"
     depends_on:
-      setup-minio:
+      setup-ollama:
         condition: service_completed_successfully
+    restart: unless-stopped
 
+  ollama-mistral:
+    build:
+      context: ./models/server
+      dockerfile: Dockerfile
+    container_name: ollama-mistral
+    expose:
+      - "50051"
+    environment:
+      MODEL_NAME: ollama-mistral
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: mistral
+      MAX_NEW_TOKENS: "128"
+      OLLAMA_TIMEOUT_S: "180"
+    depends_on:
+      setup-ollama:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # -------------------------
+  # Router (Ollama-only)
+  # -------------------------
   router:
     build:
       context: ./router
@@ -95,14 +135,19 @@ services:
     ports:
       - "50050:50050"
     environment:
-      BACKENDS_qwen-3b: "qwen-3b:50051"
-      # BACKENDS_llama-3.2-3b: "llama-3.2-3b:50051"
-      BACKENDS_qwen-1.5b: "qwen-1.5b:50051"
+      BACKENDS_llama3: "ollama-llama3:50051"
+      BACKENDS_qwen2_5: "ollama-qwen:50051"
+      BACKENDS_mistral: "ollama-mistral:50051"
+      DEFAULT_VARIANT: "llama3"
     depends_on:
-      - qwen-3b
-      # - llama-3.2-3b
-      - qwen-1.5b
+      - ollama-llama3
+      - ollama-qwen
+      - ollama-mistral
+    restart: unless-stopped
 
+  # -------------------------
+  # Evaluation pipeline
+  # -------------------------
   evaluate-pipeline:
     build:
       context: .
@@ -111,7 +156,10 @@ services:
     depends_on:
       - router
     environment:
-      - ROUTER_ADDR=qa-router:50050
+      ROUTER_ADDR: qa-router:50050
+      MODELS: "llama3,qwen2_5,mistral"
+      GRPC_TIMEOUT_S: "180"
+      MAX_SAMPLES: "10"
     volumes:
       - /data/results:/data/results
       - /data/chromadb:/chromadb
