@@ -1,23 +1,4 @@
-version: "3.9"
-
 services:
-  prepare-hotpotqa:
-    build:
-      context: ./scripts/hotpotqa
-      dockerfile: Dockerfile
-    container_name: prepare-hotpotqa
-    volumes:
-      - hotpotdata:/mnt/HotpotQA
-      - chromadbdata:/mnt/ChromaDb
-
-  prepare-qasper:
-    build:
-      context: ./scripts/qasper
-      dockerfile: Dockerfile
-    container_name: prepare-qasper
-    volumes:
-      - qasperdata:/mnt/Qasper
-      - chromadbdata:/mnt/ChromaDb
   minio:
     image: minio/minio:latest
     container_name: minio
@@ -26,86 +7,85 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
-      MINIO_DISK_THRESHOLD_PERCENTAGE: 1  # allow usage up to 99% disk
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin123
+      - MINIO_DISK_THRESHOLD_PERCENTAGE=95
     volumes:
-      - minio_data:/data
+      - /data/minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/ready > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
   setup-minio:
     build:
       context: ./minio
       dockerfile: Dockerfile
     container_name: setup-minio
     depends_on:
-      - minio
+      minio:
+        condition: service_healthy
     environment:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin123
     volumes:
-      - ./downloaded_models:/downloaded_models
-    command: ["python", "setup_minio.py"]
-  chroma:
-    image: chromadb/chroma:latest
-    container_name: chroma-server
-    ports:
-      - "8000:8000"
-    environment:
-      - IS_PERSISTENT=TRUE
-      - CHROMA_DB_IMPL=duckdb+parquet
-      - ANONYMIZED_TELEMETRY=False
-    volumes:
-      - chromadbdata:/chroma
+      - /data/downloaded_models:/downloaded_models
+    restart: "no"
 
-
-
-  tinyroberta:
+  qwen-3b:
     build:
       context: ./models/server
       dockerfile: Dockerfile
-    container_name: tinyroberta
+    container_name: qwen-3b
     expose:
       - "50051"
     environment:
-      - MODEL_NAME=tinyroberta
-      - MODEL_ID=deepset/tinyroberta-squad2
+      - MODEL_NAME=qwen-3b
+      - MODEL_ID=Qwen/Qwen2.5-3B-Instruct
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin123
     depends_on:
-      - setup-minio
+      setup-minio:
+        condition: service_completed_successfully
 
-  roberta-base:
+
+
+  # llama-3.2-3b:
+  #   build:
+  #     context: ./models/server
+  #     dockerfile: Dockerfile
+  #   container_name: llama-3.2-3b
+  #   expose:
+  #     - "50051"
+  #   environment:
+  #     - MODEL_NAME=llama-3.2-3b
+  #     - MODEL_ID=meta-llama/Llama-3.2-3B-Instruct
+  #     - MINIO_ENDPOINT=minio:9000
+  #     - MINIO_ACCESS_KEY=minioadmin
+  #     - MINIO_SECRET_KEY=minioadmin123
+  #   depends_on:
+  #     setup-minio:
+  #       condition: service_completed_successfully
+
+  qwen-1.5b:
     build:
       context: ./models/server
       dockerfile: Dockerfile
-    container_name: roberta-base
+    container_name: qwen-1.5b
     expose:
       - "50051"
     environment:
-      - MODEL_NAME=roberta-base
-      - MODEL_ID=deepset/roberta-base-squad2
+      - MODEL_NAME=qwen-1.5b
+      - MODEL_ID=Qwen/Qwen2.5-1.5B-Instruct
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin123
     depends_on:
-      - setup-minio
-
-  bert-large:
-    build:
-      context: ./models/server
-      dockerfile: Dockerfile
-    container_name: bert-large
-    expose:
-      - "50051"
-    environment:
-      - MODEL_NAME=bert-large
-      - MODEL_ID=google-bert/bert-large-uncased-whole-word-masking-finetuned-squad
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin123
-    depends_on:
-      - setup-minio
+      setup-minio:
+        condition: service_completed_successfully
 
   router:
     build:
@@ -115,15 +95,13 @@ services:
     ports:
       - "50050:50050"
     environment:
-      BACKENDS_TINYROBERTA: "tinyroberta:50051"
-      BACKENDS_ROBERTA_BASE: "roberta-base:50051"
-      BACKENDS_BERT_LARGE: "bert-large:50051"
+      BACKENDS_qwen-3b: "qwen-3b:50051"
+      # BACKENDS_llama-3.2-3b: "llama-3.2-3b:50051"
+      BACKENDS_qwen-1.5b: "qwen-1.5b:50051"
     depends_on:
-      - tinyroberta
-      - roberta-base
-      - bert-large
-    volumes:
-      - chromadbdata:/mnt/ChromaDb
+      - qwen-3b
+      # - llama-3.2-3b
+      - qwen-1.5b
 
   evaluate-pipeline:
     build:
@@ -132,32 +110,9 @@ services:
     container_name: evaluate-pipeline
     depends_on:
       - router
-      - prepare-hotpotqa
-      - prepare-qasper
     environment:
       - ROUTER_ADDR=qa-router:50050
     volumes:
-      - hotpotdata:/mnt/HotpotQA
-      - qasperdata:/mnt/Qasper
-      - chromadbdata:/mnt/ChromaDb
-      - ./results:/mnt/results
-  jupyter:
-    image: jupyter/scipy-notebook:python-3.10
-    user: root                  
-    container_name: milestone2-jupyter
-    ports:
-      - "8888:8888"
-    environment:
-      - JUPYTER_ENABLE_LAB=yes
-      - JUPYTER_TOKEN=milestone2
-    volumes:
-      - ./results:/home/jovyan/results
-      - ./notebooks:/home/jovyan/notebooks
-    working_dir: /home/jovyan/notebooks
-
-
-volumes:
-  hotpotdata:
-  qasperdata:
-  chromadbdata:
-  minio_data:
+      - /data/results:/data/results
+      - /data/chromadb:/chromadb
+      - /data/hotpotqa.csv:/data/hotpotqa.csv

@@ -1,0 +1,70 @@
+# ===============================
+# Python
+# ===============================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.env
+.venv/
+venv/
+
+# ===============================
+# Jupyter
+# ===============================
+.ipynb_checkpoints/
+*.ipynb~
+
+# ===============================
+# OS junk
+# ===============================
+.DS_Store
+Thumbs.db
+
+# ===============================
+# Data / Artifacts (DO NOT COMMIT)
+# ===============================
+data/
+chromadb/
+downloaded_models/
+hf_cache/
+minio_data/
+ollama/
+*.tgz
+*.tar
+*.zip
+
+# ===============================
+# Model weights (never commit)
+# ===============================
+*.bin
+*.safetensors
+*.pt
+*.ckpt
+
+# ===============================
+# Logs / Results
+# ===============================
+logs/
+results/
+*.log
+
+# ===============================
+# Docker
+# ===============================
+*.pid
+docker-compose.override.local.yml
+
+# ===============================
+# Editors
+# ===============================
+.vscode/
+.idea/
+
+# ===============================
+# Temporary files
+# ===============================
+tmp/
+temp/

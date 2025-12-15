@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir torch==2.3.0+cpu torchvision==0.18.0+cpu \
     pip install --no-cache-dir transformers grpcio protobuf minio
 
 
-ENV MODEL_NAME=tinyroberta
-ENV MODEL_ID=deepset/tinyroberta-squad2
+ENV MODEL_NAME=tinyllama-1.1b
+ENV MODEL_ID=TinyLlama/TinyLlama-1.1B-Chat-v1.0
 ENV PORT=50051
 CMD ["python", "server.py"]

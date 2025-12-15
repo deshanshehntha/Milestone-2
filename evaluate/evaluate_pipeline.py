@@ -1,308 +1,416 @@
+#!/usr/bin/env python3
+"""
+MULTI-COLLECTION EVALUATION (Docker)
+
+- Reads persisted ChromaDB mounted at /chromadb (read-only)
+- Auto-discovers collections and evaluates each one
+- Builds unique questions from Chroma metadata (no CSV required)
+- Retrieves top-k relevant context chunks per question from Chroma
+  - NarrativeQA: retrieves within the SAME story (story_id)
+  - HotpotQA: retrieves within the SAME question (question_id)
+- Calls QA models through gRPC router
+- Saves results per collection under /data/results/<collection_name>/
+
+Env vars:
+  CHROMA_DB_PATH=/chromadb
+  ROUTER_ADDR=qa-router:50050
+  MODELS="qwen-3b, qwen-1.5b"
+  TOP_K=6
+  RESTRICT_TO_SAME_QUESTION=1
+  MAX_SAMPLES=10 (or "None")
+  EMBED_MODEL=all-MiniLM-L6-v2
+  EVAL_COLLECTIONS="hotpotqa,narrativeqa"   # optional: restrict to subset
+  RAG_DEBUG=1  # optional: print retrieval filter + context preview
+"""
+
 import os
 import time
-import socket
-from pathlib import Path
-
+import re
 import grpc
-import pandas as pd
 import numpy as np
+import pandas as pd
+from tqdm import tqdm
 
-from sentence_transformers import SentenceTransformer, util
-
-import qa_pb2, qa_pb2_grpc
-
-# ---- NEW: Chroma imports ----
 import chromadb
 from chromadb.config import Settings
+from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+
+import qa_pb2
+import qa_pb2_grpc
 
 
-ROUTER_ADDR = "qa-router:50050"
-VARIANTS = ["tinyroberta", "roberta_base", "bert_large"]
+# -----------------------------
+# Configuration
+# -----------------------------
+CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "/chromadb")
 
-OUTPUT_PATH = "/mnt/results/all_model_results.csv"
-SUMMARY_PATH = "/mnt/results/summary.txt"
+ROUTER_ADDR = os.getenv("ROUTER_ADDR", "qa-router:50050")
+MODELS = [m.strip() for m in os.getenv("MODELS", "qwen-3b, qwen-1.5b").split(",") if m.strip()]
 
-DATASETS = {
-    "Qasper": "/mnt/Qasper/processed_qasper_df.csv",
-    "HotpotQA": "/mnt/HotpotQA/processed_hotpot_df.csv",
-}
+RESULTS_PATH = os.getenv("RESULTS_PATH", "/data/results")
 
-TOP_K = 4  # number of chunks to retrieve from Chroma
-RETRIEVE_TIMEOUT_S = 5
+TOP_K = int(os.getenv("TOP_K", "6"))
+RESTRICT_TO_SAME_QUESTION = os.getenv("RESTRICT_TO_SAME_QUESTION", "1") == "1"
 
-os.makedirs("/mnt/results", exist_ok=True)
+MAX_SAMPLES = os.getenv("MAX_SAMPLES", "10")  # "None" or integer
+MAX_SAMPLES = None if str(MAX_SAMPLES).lower() == "none" else int(MAX_SAMPLES)
 
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
+EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 
+EVAL_COLLECTIONS = os.getenv("EVAL_COLLECTIONS", "").strip()
+EVAL_COLLECTIONS = [c.strip() for c in EVAL_COLLECTIONS.split(",") if c.strip()] if EVAL_COLLECTIONS else None
 
-def wait_for_datasets():
-    print("Waiting for datasets to be ready...")
-    max_wait = 200
-    start_time = time.time()
-    required = [Path(DATASETS["Qasper"]), Path(DATASETS["HotpotQA"])]
-    while True:
-        if all(f.exists() for f in required):
-            print("Both datasets found.")
-            return True
-        if time.time() - start_time > max_wait:
-            print("Timeout waiting for datasets.")
-            return False
-        print("...still waiting for datasets...")
-        time.sleep(10)
+RAG_DEBUG = os.getenv("RAG_DEBUG", "0") == "1"
 
 
-def wait_for_router(addr="qa-router", port=50050, timeout=300):
-    print(f" Waiting for router at {addr}:{port}...")
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            with socket.create_connection((addr, port), timeout=5):
-                print("Router is ready.")
-                return True
-        except OSError:
-            time.sleep(5)
-    print("Router not reachable after timeout.")
-    return False
+# -----------------------------
+# Similarity helpers
+# -----------------------------
+def _normalize_text(s: str) -> str:
+    s = (s or "").strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    return s
 
-
-
-def cosine_similarity(prediction, ground_truth):
-    if not prediction or not ground_truth:
+def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
+    na = float(np.linalg.norm(a))
+    nb = float(np.linalg.norm(b))
+    if na == 0.0 or nb == 0.0:
         return 0.0
-    emb_pred = embedder.encode(prediction, convert_to_tensor=True)
-    emb_gt = embedder.encode(ground_truth, convert_to_tensor=True)
-    return float(util.cos_sim(emb_pred, emb_gt))
+    return float(np.dot(a, b) / (na * nb))
 
 
-def ask_question(stub, question, paper_id, variant, context_text="", retries=3):
-    metadata = (("variant", variant),)
-    req = qa_pb2.Question(
-        question=question,
-        context=context_text or "",
-        paper_id=str(paper_id or "")
+# -----------------------------
+# Connections
+# -----------------------------
+def connect_to_chromadb_client():
+    print(f"Connecting to ChromaDB at {CHROMA_DB_PATH} ...")
+    client = chromadb.PersistentClient(
+        path=CHROMA_DB_PATH,
+        settings=Settings(anonymized_telemetry=False),
+    )
+    print("Connected to ChromaDB")
+    return client
+
+def list_collections(client) -> list[str]:
+    cols = client.list_collections()
+    return [c.name for c in cols]
+
+def get_collection(client, name: str):
+    embedding_fn = SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
+    return client.get_collection(name=name, embedding_function=embedding_fn)
+
+def connect_to_router():
+    print(f"Connecting to router at {ROUTER_ADDR} ...")
+    channel = grpc.insecure_channel(ROUTER_ADDR)
+    stub = qa_pb2_grpc.QAServerStub(channel)
+    print("Connected to router")
+    return stub
+
+
+# -----------------------------
+# Build question list from Chroma metadata
+# -----------------------------
+def load_questions_from_chroma(collection, limit=None) -> pd.DataFrame:
+    """
+    Build unique question list from chunk metadatas.
+
+    Required metadata:
+      - question_id
+      - question
+      - answer
+
+    NarrativeQA fix:
+      - If story_id exists in metadata, we keep it so retrieval can filter by story_id.
+    """
+    print("Building question list from Chroma metadata...")
+
+    got = collection.get(include=["metadatas"])
+    metas = got["metadatas"]
+
+    seen = set()
+    rows = []
+    for m in metas:
+        qid = str(m.get("question_id", "")).strip()
+        if not qid or qid in seen:
+            continue
+        seen.add(qid)
+
+        rows.append(
+            {
+                "id": qid,
+                "story_id": str(m.get("story_id", "")).strip(),   # ✅ added
+                "question": str(m.get("question", "")).strip(),
+                "answer": str(m.get("answer", "")).strip(),
+                "type": str(m.get("type", "")),
+                "level": str(m.get("level", "")),
+                "dataset": str(m.get("dataset", "")),
+            }
+        )
+        if limit and len(rows) >= limit:
+            break
+
+    df = pd.DataFrame(rows)
+    print(f"Built {len(df)} unique questions from Chroma")
+    return df
+
+
+# -----------------------------
+# Retrieval (dataset-aware)
+# -----------------------------
+def build_context_from_chroma(
+    collection,
+    question: str,
+    question_id: str | None,
+    story_id: str | None,
+    k: int
+) -> str:
+    """
+    Dataset-aware retrieval filter:
+      - NarrativeQA: filter by story_id (retrieve within story)
+      - HotpotQA: filter by question_id (retrieve within question)
+      - Else: unfiltered
+    """
+    where = None
+    if RESTRICT_TO_SAME_QUESTION:
+        sid = (story_id or "").strip()
+        qid = (question_id or "").strip()
+        if sid:
+            where = {"story_id": sid}
+        elif qid:
+            where = {"question_id": qid}
+
+    results = collection.query(
+        query_texts=[question],
+        n_results=k,
+        where=where,
+        include=["documents", "metadatas", "distances"],
     )
 
-    for attempt in range(retries):
-        try:
-            start = time.time()
-            resp = stub.Answer(req, metadata=metadata)
-            elapsed = (time.time() - start) * 1000
-            return {
-                "variant": variant,
-                "question": question,
-                "paper_id": paper_id,
-                "answer": resp.answer,
-                "confidence": resp.confidence,
-                "retrieval_ms": resp.retrieval_ms,
-                "inference_ms": resp.inference_ms,
-                "end_to_end_ms": resp.end_to_end_ms,
-                "client_latency_ms": elapsed,
-            }
-        except grpc.RpcError as e:
-            print(f" gRPC error ({variant}) attempt {attempt+1}: {e.code().name}")
-            time.sleep(5)
-    print(f" Failed after {retries} retries for {variant}.")
-    return {
-        "variant": variant,
-        "question": question,
-        "paper_id": paper_id,
-        "answer": "",
-        "confidence": 0.0,
-        "retrieval_ms": 0.0,
-        "inference_ms": 0.0,
-        "end_to_end_ms": 0.0,
-        "client_latency_ms": 0.0,
-    }
+    docs = results["documents"][0]
+    metas = results["metadatas"][0]
+
+    parts = []
+    for d, m in zip(docs, metas):
+        ci = m.get("chunk_index", "")
+        # include IDs for debugging confidence that filter worked
+        sid = m.get("story_id", "")
+        qid = m.get("question_id", "")
+        parts.append(f"[chunk {ci}] story_id={sid} question_id={qid}\n{d}")
+
+    ctx = "\n\n---\n\n".join(parts).strip()
+
+    if RAG_DEBUG:
+        print("\n--- RAG DEBUG ---")
+        print("where:", where)
+        print("context_chars:", len(ctx))
+        print("context_preview:\n", ctx[:500])
+        print("--- END RAG DEBUG ---\n")
+
+    return ctx
 
 
+# -----------------------------
+# Evaluation
+# -----------------------------
+def evaluate_collection(collection_name: str, collection, stub) -> pd.DataFrame:
+    print("\n" + "=" * 70)
+    print(f"Evaluating collection: {collection_name}")
+    print("=" * 70)
+    print(f"Collection '{collection_name}' has {collection.count()} chunks")
 
-def connect_chroma():
-    # Uses your docker service name "chroma" and exposed port 8000
-    for attempt in range(10):
-        try:
-            client = chromadb.HttpClient(
-                host="chroma",
-                port=8000,
-                settings=Settings(allow_reset=False)
-            )
-            # simple ping: list collections (won't throw if reachable)
-            _ = client.list_collections()
-            print("Connected to Chroma server.")
-            return client
-        except Exception as e:
-            print(f" Waiting for Chroma to be ready (attempt {attempt+1}/10)... {e}")
-            time.sleep(3)
-    raise ConnectionError("Could not connect to Chroma server after 10 attempts.")
+    df_questions = load_questions_from_chroma(collection, limit=MAX_SAMPLES or None)
 
+    if df_questions.empty:
+        print(f"No questions found in collection '{collection_name}' (missing metadata?)")
+        return pd.DataFrame()
 
-def load_collections(chroma_client):
-    # Must match names used during ingestion
-    colls = {}
-    try:
-        colls["Qasper"]   = chroma_client.get_collection("qasper_data_collection")
-    except Exception as e:
-        print(f"⚠️ Could not open Qasper collection: {e}")
-    try:
-        colls["HotpotQA"] = chroma_client.get_collection("hotpotqa_data_collection")
-    except Exception as e:
-        print(f"⚠️ Could not open HotpotQA collection: {e}")
-    return colls
+    total_q = len(df_questions)
+    print(f"Evaluating {total_q} questions x {len(MODELS)} models (k={TOP_K}, restrict={RESTRICT_TO_SAME_QUESTION})")
 
-
-def retrieve_context(collection, dataset_name, question_text, paper_or_id=None, top_k=TOP_K):
-    """
-    Query Chroma for relevant chunks. If an id is provided, try to filter to that doc
-    (paper_id for Qasper; hotpot_id for HotpotQA). Falls back to unfiltered query if needed.
-    """
-    if collection is None:
-        return ""
-
-    # Build an optional filter depending on dataset
-    where = None
-    if paper_or_id:
-        if dataset_name == "Qasper":
-            where = {"paper_id": str(paper_or_id)}
-        elif dataset_name == "HotpotQA":
-            where = {"hotpot_id": str(paper_or_id)}
-
-    # First: try filtered search (if where provided)
-    try:
-        if where:
-            res = collection.query(query_texts=[question_text], n_results=top_k, where=where)
-        else:
-            res = collection.query(query_texts=[question_text], n_results=top_k)
-
-        docs = res.get("documents", [[]])[0]
-        # Dedup while preserving order
-        seen, unique_docs = set(), []
-        for d in docs:
-            if d not in seen:
-                unique_docs.append(d)
-                seen.add(d)
-
-        return "\n\n".join(unique_docs)
-    except Exception as e:
-        print(f"Retrieval failed (primary), falling back without filters: {e}")
-
-    # Fallback: unfiltered query
-    try:
-        res = collection.query(query_texts=[question_text], n_results=top_k)
-        docs = res.get("documents", [[]])[0]
-        seen, unique_docs = set(), []
-        for d in docs:
-            if d not in seen:
-                unique_docs.append(d)
-                seen.add(d)
-        return "\n\n".join(unique_docs)
-    except Exception as e:
-        print(f"Retrieval failed (fallback): {e}")
-        return ""
-
-
-
-def evaluate_dataset(name, path, stub, collections):
-    print(f" Evaluating dataset: {name}")
-    df = pd.read_csv(path)
-
-    if "question" not in df.columns or len(df) == 0:
-        print(f"No valid questions found in {name}")
-        return None
-
-    # Normalize answers
-    if "free_form_answer" in df.columns:
-        df["answer_text"] = df["free_form_answer"]
-    elif "answer" in df.columns:
-        df["answer_text"] = df["answer"]
-    else:
-        df["answer_text"] = ""
-
-    # Determine row id field for retrieval filter
-    id_field = None
-    if name == "Qasper":
-        id_field = "paper_id" if "paper_id" in df.columns else None
-    elif name == "HotpotQA":
-        # ingestion used "hotpot_id" as metadata, but row carries "id" in CSV
-        id_field = "id" if "id" in df.columns else None
+    answer_embedder = SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
 
     results = []
-    chroma_coll = collections.get(name)
+    pbar = tqdm(total=total_q * len(MODELS), desc=f"Evaluating {collection_name}")
 
-    for idx, row in df.head(100).iterrows():  # limit for test run
-        q = str(row["question"])
-        gt = str(row["answer_text"])
-        pid = str(row[id_field]) if id_field and id_field in row else None
+    for _, row in df_questions.iterrows():
+        qid = str(row.get("id", "")).strip()
+        story_id = str(row.get("story_id", "")).strip()
+        question = str(row.get("question", "")).strip()
+        true_answer = str(row.get("answer", "")).strip()
+        q_type = str(row.get("type", ""))
+        q_level = str(row.get("level", ""))
+        dataset = str(row.get("dataset", ""))
 
-        # --- NEW: dynamic retrieval from Chroma ---
-        ctx = retrieve_context(chroma_coll, name, q, paper_or_id=pid, top_k=TOP_K)
+        context = build_context_from_chroma(
+            collection,
+            question=question,
+            question_id=qid,
+            story_id=story_id,
+            k=TOP_K,
+        )
 
-        # If retrieval fails, optionally fall back to any CSV 'context' column if present
-        if not ctx:
-            ctx = str(row.get("context", "")) if "context" in df.columns else ""
+        true_vec = (
+            np.array(answer_embedder([true_answer])[0], dtype=np.float32)
+            if true_answer
+            else np.zeros(384, dtype=np.float32)
+        )
 
-        for variant in VARIANTS:
-            print(f"→ [{variant}] {q[:80]}...")
-            model_out = ask_question(stub, q, pid, variant, context_text=ctx)
-            model_out["dataset"] = name
-            model_out["ground_truth"] = gt
-            model_out["cosine_sim"] = cosine_similarity(model_out["answer"], gt)
-            model_out["overhead_ms"] = max(
-                0.0,
-                model_out["end_to_end_ms"] - model_out["inference_ms"] - model_out["retrieval_ms"]
-            )
-            results.append(model_out)
+        for model_variant in MODELS:
+            try:
+                req = qa_pb2.Question(question=question, context=context)
 
-    return pd.DataFrame(results)
+                start = time.time()
+                resp = stub.Answer(
+                    req,
+                    metadata=[("variant", model_variant)],
+                    timeout=60,
+                )
+                elapsed_ms = (time.time() - start) * 1000
+
+                pred_answer = resp.answer or ""
+                pred_vec = (
+                    np.array(answer_embedder([pred_answer])[0], dtype=np.float32)
+                    if pred_answer
+                    else np.zeros_like(true_vec)
+                )
+
+                ans_cos = cosine_sim(true_vec, pred_vec)
+                exact = 1 if _normalize_text(pred_answer) == _normalize_text(true_answer) and true_answer else 0
+
+                results.append(
+                    {
+                        "collection": collection_name,
+                        "dataset": dataset,
+                        "story_id": story_id,        # ✅ added
+                        "question_id": qid,
+                        "question": question,
+                        "true_answer": true_answer,
+                        "predicted_answer": pred_answer,
+                        "model": model_variant,
+                        "confidence": float(resp.confidence),
+                        "answer_cosine_sim": float(ans_cos),
+                        "exact_match": int(exact),
+                        "type": q_type,
+                        "level": q_level,
+                        "retrieval_k": TOP_K,
+                        "router_retrieval_ms": float(getattr(resp, "retrieval_ms", 0.0)),
+                        "inference_ms": float(getattr(resp, "inference_ms", 0.0)),
+                        "end_to_end_ms": float(getattr(resp, "end_to_end_ms", 0.0)),
+                        "client_elapsed_ms": float(elapsed_ms),
+                    }
+                )
+
+            except grpc.RpcError as e:
+                results.append(
+                    {
+                        "collection": collection_name,
+                        "dataset": dataset,
+                        "story_id": story_id,
+                        "question_id": qid,
+                        "question": question,
+                        "true_answer": true_answer,
+                        "predicted_answer": "ERROR",
+                        "model": model_variant,
+                        "confidence": 0.0,
+                        "answer_cosine_sim": 0.0,
+                        "exact_match": 0,
+                        "type": q_type,
+                        "level": q_level,
+                        "retrieval_k": TOP_K,
+                        "router_retrieval_ms": 0.0,
+                        "inference_ms": 0.0,
+                        "end_to_end_ms": 0.0,
+                        "client_elapsed_ms": 0.0,
+                        "grpc_code": str(e.code()),
+                        "grpc_details": str(e.details()),
+                    }
+                )
+
+            pbar.update(1)
+
+    pbar.close()
+    df_results = pd.DataFrame(results)
+    print(f"Evaluation complete for '{collection_name}'. Rows: {len(df_results)}")
+    return df_results
 
 
+# -----------------------------
+# Saving
+# -----------------------------
+def save_results_for_collection(collection_name: str, df_results: pd.DataFrame):
+    out_dir = os.path.join(RESULTS_PATH, collection_name)
+    os.makedirs(out_dir, exist_ok=True)
 
+    csv_path = os.path.join(out_dir, "evaluation_results.csv")
+    df_results.to_csv(csv_path, index=False)
+    print(f"Saved results CSV: {csv_path}")
+
+    summary_path = os.path.join(out_dir, "evaluation_summary.txt")
+    with open(summary_path, "w") as f:
+        f.write("=" * 70 + "\n")
+        f.write(f"Evaluation Summary - {collection_name}\n")
+        f.write("=" * 70 + "\n\n")
+        f.write(f"Models: {', '.join(MODELS)}\n")
+        f.write(f"TOP_K: {TOP_K}\n")
+        f.write(f"RESTRICT_TO_SAME_QUESTION: {RESTRICT_TO_SAME_QUESTION}\n")
+        f.write(f"EMBED_MODEL: {EMBED_MODEL}\n")
+        f.write(f"Rows: {len(df_results)}\n\n")
+
+        for model in MODELS:
+            md = df_results[df_results["model"] == model]
+            f.write(f"\n{model}:\n")
+            f.write(f"  Total: {len(md)}\n")
+            if len(md) > 0:
+                f.write(f"  Avg confidence: {md['confidence'].mean():.3f}\n")
+                f.write(f"  Avg answer_cosine_sim: {md['answer_cosine_sim'].mean():.3f}\n")
+                f.write(f"  Exact match rate: {md['exact_match'].mean():.3f}\n")
+                f.write(f"  Avg inference_ms: {md['inference_ms'].mean():.1f}\n")
+                f.write(f"  Avg end_to_end_ms: {md['end_to_end_ms'].mean():.1f}\n")
+
+    print(f"Saved summary: {summary_path}")
+
+
+# -----------------------------
+# Main
+# -----------------------------
 def main():
-    if not wait_for_datasets():
+    print("\n" + "=" * 70)
+    print("Multi-Collection Evaluation Pipeline (Chroma Retrieval)")
+    print("=" * 70)
+
+    client = connect_to_chromadb_client()
+    stub = connect_to_router()
+
+    all_cols = list_collections(client)
+    print(f"Found collections: {all_cols}")
+
+    if EVAL_COLLECTIONS is not None:
+        cols = [c for c in all_cols if c in EVAL_COLLECTIONS]
+        print(f"Restricting to EVAL_COLLECTIONS={EVAL_COLLECTIONS} -> {cols}")
+    else:
+        cols = all_cols
+
+    if not cols:
+        print("No collections to evaluate.")
         return
-    if not wait_for_router():
-        return
 
-    chroma_client = connect_chroma()
-    collections = load_collections(chroma_client)
+    for name in cols:
+        try:
+            col = get_collection(client, name)
+        except Exception as e:
+            print(f"Skipping collection '{name}' (failed to open): {e}")
+            continue
 
-    all_results = []
-    with grpc.insecure_channel(ROUTER_ADDR) as channel:
-        stub = qa_pb2_grpc.QAServerStub(channel)
-        for name, path in DATASETS.items():
-            if os.path.exists(path):
-                res_df = evaluate_dataset(name, path, stub, collections)
-                if res_df is not None:
-                    all_results.append(res_df)
+        df_results = evaluate_collection(name, col, stub)
+        if df_results is None or df_results.empty:
+            print(f"No results for '{name}'.")
+            continue
 
-    if not all_results:
-        print(" No results generated.")
-        return
+        save_results_for_collection(name, df_results)
 
-    combined = pd.concat(all_results, ignore_index=True)
-    combined.to_csv(OUTPUT_PATH, index=False)
-
-    summary = (
-        combined.groupby("variant")[["retrieval_ms", "inference_ms", "end_to_end_ms", "overhead_ms"]]
-        .mean()
-        .round(2)
-    )
-    summary.to_csv("/mnt/results/latency_breakdown_by_variant.csv")
-    print(summary)
-
-    avg_sim = combined["cosine_sim"].mean()
-    avg_conf = combined["confidence"].mean()
-    avg_latency = combined["end_to_end_ms"].mean()
-
-    print(f"\n Saved all results to {OUTPUT_PATH}")
-    print("Average Cosine Similarity:", avg_sim)
-    print("Average Confidence:", avg_conf)
-    print("Average Latency (ms):", avg_latency)
-
-    with open(SUMMARY_PATH, "w") as f:
-        f.write(f"Average Cosine Similarity: {avg_sim}\n")
-        f.write(f"Average Confidence: {avg_conf}\n")
-        f.write(f"Average Latency (ms): {avg_latency}\n")
-
-    print(f" Summary saved to {SUMMARY_PATH}")
+    print("\n" + "=" * 70)
+    print("All collection evaluations complete!")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
