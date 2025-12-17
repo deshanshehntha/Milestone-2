@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os, glob
 import joblib
 import pandas as pd
@@ -60,7 +59,6 @@ def main():
     results_glob = os.getenv("ROUTER_TRAIN_GLOB", "/data/results/**/evaluation_results.csv")
     out_path = os.getenv("ROUTER_MODEL_PATH", "/data/router_model/router_model.joblib")
 
-    # weights for score (latency is NOT used)
     em_w = float(os.getenv("ROUTER_EM_WEIGHT", "0.25"))
     cos_w = float(os.getenv("ROUTER_COS_WEIGHT", "1.0"))
 

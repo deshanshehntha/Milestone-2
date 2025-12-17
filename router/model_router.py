@@ -108,12 +108,10 @@ def pick_backend(
 
     obj = _state["obj"]
     if not isinstance(obj, dict):
-        # Backward compatibility: if someone still dumps a raw sklearn pipeline
         obj = {"router_type": "ml", "ml_model": obj}
 
     router_type = str(obj.get("router_type", "ml")).strip().lower()
 
-    # Common features (for logging/debug)
     X = {
         "dataset": ds,
         "prompt_chars": len(question or ""),

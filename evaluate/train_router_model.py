@@ -37,7 +37,6 @@ def main():
 
     df = pd.concat([pd.read_csv(p) for p in csvs], ignore_index=True)
 
-    # --- normalize columns / make dataset always present ---
     if "dataset" not in df.columns:
         df["dataset"] = ""
     if "collection" not in df.columns:
@@ -46,28 +45,22 @@ def main():
     df["dataset"] = df["dataset"].fillna("").astype(str).str.strip().str.lower()
     df["collection"] = df["collection"].fillna("").astype(str).str.strip().str.lower()
 
-    # fallback: dataset := collection if empty
     df.loc[df["dataset"] == "", "dataset"] = df.loc[df["dataset"] == "", "collection"]
     df.loc[df["dataset"] == "", "dataset"] = "unknown"
 
-    # ensure feature columns exist
     for c in ["prompt_chars", "context_chars", "retrieval_k"]:
         if c not in df.columns:
             df[c] = 0
 
-    # must have these to train
     required = ["question_id", "model", "answer_cosine_sim", "exact_match"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise SystemExit(f"Missing required columns in eval CSV(s): {missing}")
 
-    # group key (prefer question_id)
     key = "question_id"
 
-    # labels: best model per question
     y = df.groupby(key).apply(pick_best_model)
 
-    # features: first row per question
     first = df.groupby(key).first().copy()
     X = first[["dataset", "prompt_chars", "context_chars", "retrieval_k"]].copy()
 

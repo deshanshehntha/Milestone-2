@@ -1,16 +1,5 @@
-"""Streamlit UI for Quick Mixed Evaluation.
+"""Streamlit UI"""
 
-Features
-- Browse results in /data/results_quick/**/evaluation_results.csv
-- Charts + table + CSV download
-- Select a question from a run and send it to the gRPC router
-- View FULL context sent to the router (preview + full text area + download)
-- Fixes Streamlit widget-state: selected row can be loaded into editable fields reliably
-
-Notes
-- Batch eval subprocess runner is optional and only shown if quick_mixed_eval.py exists.
-- The single-question runner calls Chroma + router directly.
-"""
 
 from __future__ import annotations
 
@@ -28,13 +17,11 @@ import streamlit as st
 
 
 APP_TITLE = "Quick Mixed Evaluation UI"
-SCRIPT_NAME = "quick_mixed_eval.py"  # optional: only needed if you want UI to run batch eval
+SCRIPT_NAME = "quick_mixed_eval.py" 
 DEFAULT_RESULTS_PATH = "/data/results_quick"
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
+
 def _safe_int(s: str, default: int) -> int:
     try:
         return int(s)
@@ -129,9 +116,7 @@ def parse_json_lines(text: str) -> list[dict]:
     return out
 
 
-# -----------------------------
-# UI blocks
-# -----------------------------
+
 def render_metrics(df: pd.DataFrame):
     if df.empty:
         st.info("No rows in CSV.")
@@ -219,14 +204,12 @@ def render_table(df: pd.DataFrame):
 
 
 def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
-    """Pick a question from the loaded run and send it to the router on-demand."""
     st.header("Ask the router")
 
     if df.empty or "question" not in df.columns:
         st.info("Load a run with a 'question' column to use this.")
         return
 
-    # ---------- selection label ----------
     def _label(i: int) -> str:
         row = df.iloc[i]
         q = str(row.get("question", "") or "")
@@ -236,7 +219,6 @@ def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
         q_short = (q[:120] + "…") if len(q) > 120 else q
         return f"[{i}] {ds or col} | qid={qid} | {q_short}"
 
-    # ---------- load row into session state ----------
     def _load_row_into_state(i: int):
         r = df.iloc[int(i)]
         st.session_state["ask_q"] = str(r.get("question", "") or "")
@@ -245,7 +227,6 @@ def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
         st.session_state["ask_story"] = _clean_id(r.get("story_id", ""))
         st.session_state["ask_qid"] = _clean_id(r.get("question_id", ""))
 
-    # init
     if "ask_idx" not in st.session_state:
         st.session_state["ask_idx"] = 0
         _load_row_into_state(0)
@@ -264,7 +245,6 @@ def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
     with colB:
         st.caption("Pick a row → click **Load selected row** → fields update. Then you can edit freely.")
 
-    # ---------- editable form ----------
     with st.form("ask_form", clear_on_submit=False):
         st.caption("You can edit before sending.")
         q_text = st.text_area("Question", value=st.session_state.get("ask_q", ""), height=120, key="ask_q")
@@ -316,7 +296,6 @@ def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
     if not send:
         return
 
-    # Lazy imports so UI loads even if deps missing until you click.
     import grpc
     import chromadb
     from chromadb.config import Settings
@@ -325,7 +304,6 @@ def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
     import qa_pb2
     import qa_pb2_grpc
 
-    # --- connect chroma ---
     try:
         client = chromadb.PersistentClient(
             path=cfg.chroma_db_path,
@@ -340,7 +318,6 @@ def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
         st.error(f"Chroma error: {e}")
         return
 
-    # --- build (optional) where filter safely ---
     where = None
     if cfg.restrict_same_question:
         sid = _clean_id(story_id)
@@ -350,13 +327,12 @@ def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
         elif qid:
             where = {"question_id": qid}
 
-    # --- query for context ---
     try:
         t0 = time.time()
         results = collection.query(
             query_texts=[q_text],
             n_results=int(top_k),
-            where=where,  # you can leave restrict_same_question OFF if you don't want this
+            where=where,  
             include=["documents", "metadatas"],
         )
         retrieval_ms = (time.time() - t0) * 1000.0
@@ -364,7 +340,6 @@ def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
         docs = results["documents"][0]
         metas = results["metadatas"][0]
 
-        # If the filter was too strict, retry without it
         if len(docs) == 0 and where is not None:
             st.warning("0 hits with filter; retrying without filter...")
             t0b = time.time()
@@ -390,7 +365,6 @@ def render_single_question_runner(cfg: EvalConfig, df: pd.DataFrame):
         st.error(f"Context build error: {e}")
         return
 
-    # --- call router ---
     md = [("dataset", (dataset_override or "").strip().lower() or "unknown")]
     md.append(("variant", variant))
     md.append(("retrieval_k", str(int(top_k))))
@@ -475,7 +449,6 @@ def main():
 
         chroma_db_path = st.text_input("CHROMA_DB_PATH", value=os.getenv("CHROMA_DB_PATH", "/chromadb"))
 
-        # If you're on docker compose, this is often best as 'router:50050'
         router_addr = st.text_input("ROUTER_ADDR", value=os.getenv("ROUTER_ADDR", "router:50050"))
 
         eval_collections = st.text_input(
@@ -573,7 +546,6 @@ def main():
                 "Use your evaluate-quick container to generate CSVs, then view them here."
             )
 
-    # Optional batch runner (subprocess)
     log_box = st.empty()
     progress = st.progress(0)
 
@@ -630,7 +602,6 @@ def main():
 
     st.divider()
 
-    # Load results
     st.header("Results")
     run_dirs = _find_run_dirs(cfg.results_path)
     selected = st.selectbox(

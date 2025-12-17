@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""
-MULTI-COLLECTION EVALUATION (Docker)
-
-Fixes:
-- dataset is forced non-empty (fallback to collection_name)
-- training runs after eval, then uploads model to MinIO (optional)
-"""
 
 import os
 import time
@@ -52,7 +45,7 @@ RETR_CACHE_TTL_S = int(os.getenv("RETR_CACHE_TTL_S", "3600"))
 TRIM_CHUNKS = os.getenv("TRIM_CHUNKS", "0") == "1"
 MAX_CHARS_PER_CHUNK = int(os.getenv("MAX_CHARS_PER_CHUNK", "1000"))
 
-_retr_cache = {}  # key -> (expires_at, ctx_string)
+_retr_cache = {}  
 
 
 def now_ms() -> int:
@@ -268,7 +261,6 @@ def evaluate_collection(collection_name: str, collection, stub) -> pd.DataFrame:
         q_type = str(row.get("type", ""))
         q_level = str(row.get("level", ""))
 
-        # ✅ force non-empty dataset (fixes training + routing features)
         dataset_raw = str(row.get("dataset", "")).strip().lower()
         dataset = dataset_raw or collection_name.lower()
         dataset = str(row.get("dataset", "")).strip().lower()
@@ -306,7 +298,7 @@ def evaluate_collection(collection_name: str, collection, stub) -> pd.DataFrame:
                     req,
                     metadata=[
                         ("variant", model_variant),
-                        ("dataset", dataset),  # ✅ always non-empty
+                        ("dataset", dataset),  
                     ],
                     timeout=GRPC_TIMEOUT_S,
                 )
@@ -325,7 +317,7 @@ def evaluate_collection(collection_name: str, collection, stub) -> pd.DataFrame:
 
                 row_out = {
                     "collection": collection_name,
-                    "dataset": dataset,  # ✅ always present
+                    "dataset": dataset,  
                     "story_id": story_id,
                     "question_id": qid,
                     "question": question,
@@ -381,7 +373,7 @@ def evaluate_collection(collection_name: str, collection, stub) -> pd.DataFrame:
                 results.append(
                     {
                         "collection": collection_name,
-                        "dataset": dataset,  # ✅ keep dataset even on error rows
+                        "dataset": dataset,  
                         "story_id": story_id,
                         "question_id": qid,
                         "question": question,
@@ -507,7 +499,7 @@ def main():
         if r.returncode != 0:
             print("Router model training failed (non-fatal).")
         else:
-            # ✅ upload to MinIO after successful training
+           
             try:
                 from s3_artifacts import upload_file
                 if upload_file(ROUTER_MODEL_PATH):

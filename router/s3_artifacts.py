@@ -9,7 +9,6 @@ def _client():
     secret = os.getenv("S3_SECRET_KEY", "").strip() or None
     region = os.getenv("S3_REGION", "us-east-1").strip() or "us-east-1"
 
-    # MinIO wants path-style addressing commonly
     cfg = Config(signature_version="s3v4", s3={"addressing_style": "path"})
 
     return boto3.client(

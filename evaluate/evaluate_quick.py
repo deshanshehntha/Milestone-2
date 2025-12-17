@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Quick Mixed Evaluation (AUTO routing, fixed-per-collection sampling, no overwrite)
+Quick Mixed Evaluation
 
 Goal:
 - For each collection in EVAL_COLLECTIONS (or all collections), sample EXACTLY N questions
@@ -20,7 +20,7 @@ Env (important):
 - ROUTER_ADDR=qa-router:50050
 - EVAL_COLLECTIONS=hotpotqa,narrativeqa,pubmedqa
 - PER_COLLECTION_SAMPLES=300
-- PEEK_LIMIT=5000  (increase if you can’t reach 300 uniques)
+- PEEK_LIMIT=5000 
 - TOP_K=6
 - GRPC_TIMEOUT_S=60
 - RESULTS_PATH=/data/results_quick
@@ -46,9 +46,7 @@ import qa_pb2
 import qa_pb2_grpc
 
 
-# -----------------------------
-# Env
-# -----------------------------
+
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "/chromadb")
 ROUTER_ADDR = os.getenv("ROUTER_ADDR", "qa-router:50050")
 
@@ -71,14 +69,11 @@ EVAL_COLLECTIONS = ([c.strip() for c in EVAL_COLLECTIONS.split(",") if c.strip()
 
 MIX_SEED = int(os.getenv("MIX_SEED", "42"))
 
-# NEW: fixed per-collection sampling
 PER_COLLECTION_SAMPLES = int(os.getenv("PER_COLLECTION_SAMPLES", "300"))
 PEEK_LIMIT = int(os.getenv("PEEK_LIMIT", str(max(30000000, PER_COLLECTION_SAMPLES * 4))))
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
+
 def now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -106,9 +101,7 @@ def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (na * nb))
 
 
-# -----------------------------
-# Chroma / Router
-# -----------------------------
+
 def connect_to_chromadb_client():
     print(f"Connecting to ChromaDB at {CHROMA_DB_PATH} ...", flush=True)
     client = chromadb.PersistentClient(
@@ -136,15 +129,8 @@ def connect_to_router():
     return stub
 
 
-# -----------------------------
-# Bounded metadata fetch (Chroma version compatible)
-# -----------------------------
 def _peek_metadatas(collection, n: int):
-    """
-    Try to get metadatas via peek(limit=n). Some Chroma versions:
-      - don't accept include=
-      - may or may not return metadatas
-    """
+
     try:
         got = collection.peek(limit=n)
     except Exception:
@@ -156,20 +142,14 @@ def _peek_metadatas(collection, n: int):
 
 
 def _get_metadatas(collection, n: int):
-    """
-    Fallback: collection.get with limit + include metadatas.
-    (Avoid unbounded get())
-    """
+
     got = collection.get(limit=n, include=["metadatas"])
     metas = got.get("metadatas") if isinstance(got, dict) else None
     return metas or []
 
 
 def load_questions_from_chroma(collection, collection_name: str, limit: int) -> pd.DataFrame:
-    """
-    Return up to `limit` unique questions from the collection.
-    We fetch up to PEEK_LIMIT metadatas to find enough unique question_ids.
-    """
+
     n = max(PEEK_LIMIT, limit)
 
     metas = _peek_metadatas(collection, n)
@@ -234,9 +214,7 @@ def build_context_from_chroma(collection, question: str, story_id: str, question
     return ctx, float(retrieval_ms)
 
 
-# -----------------------------
-# Fixed sampling: N per collection (e.g., 300/300/300)
-# -----------------------------
+
 def build_fixed_per_collection_list(client, cols: list[str]) -> pd.DataFrame:
     dfs = []
     print(f"\nSampling {PER_COLLECTION_SAMPLES} per collection (peek_limit={PEEK_LIMIT})", flush=True)
@@ -253,7 +231,6 @@ def build_fixed_per_collection_list(client, cols: list[str]) -> pd.DataFrame:
             df["dataset"] = df["dataset"].fillna("").astype(str).str.strip().str.lower()
             df.loc[df["dataset"] == "", "dataset"] = name.strip().lower()
 
-            # If we didn't reach target, warn (raise peek_limit if this happens)
             if len(df) < PER_COLLECTION_SAMPLES:
                 print(
                     f"WARNING: '{name}' only yielded {len(df)}/{PER_COLLECTION_SAMPLES} unique questions. "
@@ -283,9 +260,7 @@ def build_fixed_per_collection_list(client, cols: list[str]) -> pd.DataFrame:
     return out
 
 
-# -----------------------------
-# Evaluate (AUTO routing)
-# -----------------------------
+
 def evaluate_mixed_questions(client, stub, cols: list[str]) -> pd.DataFrame:
     qdf = build_fixed_per_collection_list(client, cols)
     if qdf.empty:
@@ -327,7 +302,6 @@ def evaluate_mixed_questions(client, stub, cols: list[str]) -> pd.DataFrame:
 
         t0 = time.time()
         try:
-            # IMPORTANT: do NOT force a backend. Let router decide from MinIO-trained artifact.
             call_md = [
                 ("dataset", dataset),
                 ("variant", "auto"),

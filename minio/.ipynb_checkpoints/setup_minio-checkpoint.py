@@ -27,12 +27,12 @@ def wait_for_minio(client: Minio, timeout_s: int = 120):
     while True:
         try:
             client.list_buckets()
-            print("✅ MinIO is ready", flush=True)
+            print(" MinIO is ready", flush=True)
             return
         except Exception as e:
             if time.time() - start > timeout_s:
                 raise RuntimeError(f"Timed out waiting for MinIO: {e}")
-            print("⏳ Waiting for MinIO...", flush=True)
+            print(" Waiting for MinIO...", flush=True)
             time.sleep(2)
 
 client = Minio(
@@ -90,4 +90,4 @@ client.put_object(
     length=2,
     content_type="text/plain",
 )
-print("✅ All models uploaded to MinIO successfully. READY marker written.", flush=True)
+print("All models uploaded to MinIO successfully. READY marker written.", flush=True)

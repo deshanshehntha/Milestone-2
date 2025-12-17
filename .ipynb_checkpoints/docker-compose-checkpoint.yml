@@ -103,9 +103,6 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # ---------------------------
-  # MinIO (S3-compatible) artifact store
-  # ---------------------------
   minio:
     image: minio/minio:latest
     container_name: minio
@@ -134,9 +131,7 @@ services:
       "
     restart: "no"
 
-  # ---------------------------
-  # Router (inference) - pulls model from MinIO and reloads periodically
-  # ---------------------------
+
   router:
     build:
       context: ./router
@@ -171,9 +166,7 @@ services:
       - ollama-mistral
     restart: unless-stopped
 
-  # ---------------------------
-  # Evaluation (step 1): generates /data/results/**/evaluation_results.csv
-  # ---------------------------
+
   evaluate-pipeline:
     build:
       context: .
@@ -195,9 +188,6 @@ services:
       - /data/hotpotqa.csv:/data/hotpotqa.csv
     restart: "no"
 
-  # ---------------------------
-  # Trainers (step 2): choose ONE to run
-  # ---------------------------
 
   # ML router trainer: outputs artifact with {router_type:"ml", ml_model:...}
   router-trainer-ml:
@@ -212,7 +202,6 @@ services:
       ROUTER_TRAIN_GLOB: "/data/results/**/evaluation_results.csv"
       ROUTER_EM_WEIGHT: "0.25"
       ROUTER_LAT_WEIGHT: "0.0002"
-
       S3_ENDPOINT_URL: "http://minio:9000"
       S3_ACCESS_KEY: "minioadmin"
       S3_SECRET_KEY: "minioadmin"
@@ -238,7 +227,6 @@ services:
       ROUTER_TRAIN_GLOB: "/data/results/**/evaluation_results.csv"
       ROUTER_EM_WEIGHT: "0.25"
       ROUTER_LAT_WEIGHT: "0.0002"
-
       S3_ENDPOINT_URL: "http://minio:9000"
       S3_ACCESS_KEY: "minioadmin"
       S3_SECRET_KEY: "minioadmin"
@@ -257,30 +245,21 @@ services:
       dockerfile: evaluate/Dockerfile.inference
     container_name: evaluate-quick
     environment:
-      # unbuffered logs
       PYTHONUNBUFFERED: "1"
-
       ROUTER_ADDR: qa-router:50050
       CHROMA_DB_PATH: /chromadb
-
       MAX_SAMPLES: "1000"
       TOP_K: "8"
       GRPC_TIMEOUT_S: "60"
-
       RESULTS_PATH: "/data/results_quick"
-      RUN_ID: "latest"   # or omit to auto timestamp
-
-      # NOTE: remove the extra space in your list
+      RUN_ID: "latest"  
       EVAL_COLLECTIONS: "hotpotqa,narrativeqa,pubmedqa"
-
       JSON_LOGS: "1"
       RESTRICT_TO_SAME_QUESTION: "1"
       EMBED_MODEL: "all-MiniLM-L6-v2"
-
       # IMPORTANT for “router switching” tests:
       # set MODELS=auto and in evaluate_quick.py handle it by NOT sending ("variant", ...)
       MODELS: "auto"
-
     volumes:
       - /data/chromadb:/chromadb
       - /data/results_quick:/data/results_quick
@@ -295,13 +274,9 @@ services:
       - "8081:8501"
     environment:
       PYTHONUNBUFFERED: "1"
-
-      # must match your network names
       ROUTER_ADDR: qa-router:50050
       CHROMA_DB_PATH: /chromadb
-
       RESULTS_PATH: "/data/results_quick"
-      # optional defaults for the UI inputs
       EVAL_COLLECTIONS: "hotpotqa,narrativeqa,pubmedqa"
       PER_COLLECTION_SAMPLES: "300"
       PEEK_LIMIT: "5000"
@@ -311,15 +286,9 @@ services:
       RESTRICT_TO_SAME_QUESTION: "1"
       EMBED_MODEL: "all-MiniLM-L6-v2"
       MIX_SEED: "42"
-
     volumes:
       - /data/chromadb:/chromadb
-      - /data/results_quick:/data/results_quick
-
-      # if you prefer live-editing without rebuilds (dev mode), mount your code too:
-      # - ./eval_ui:/app
-      # - ./evaluate:/app/evaluate  (if your script lives there)
-
+      - /data/results_quick:/data/results_quic
     depends_on:
       - router
     restart: unless-stopped

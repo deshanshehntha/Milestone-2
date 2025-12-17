@@ -2,21 +2,17 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Make logs appear instantly
 ENV PYTHONUNBUFFERED=1
 
 
-# Copy ONLY what you need (avoid COPY . .)
 COPY evaluate/evaluate_quick.py /app/evaluate_quick.py
 COPY evaluate/qa_pb2.py /app/qa_pb2.py
 COPY evaluate/qa_pb2_grpc.py /app/qa_pb2_grpc.py
 
-# If qa_pb2*.py are not in evaluate/, copy them from wherever they live in your repo instead.
 
 RUN pip install --no-cache-dir \
     grpcio pandas numpy tqdm chromadb sentence-transformers
 
-# Make sure output dir exists (matches compose mount)
 RUN mkdir -p /data/results_quick
 
 CMD ["python", "/app/evaluate_quick.py"]

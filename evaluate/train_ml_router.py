@@ -53,7 +53,6 @@ def main() -> None:
 
     df = pd.concat([pd.read_csv(p) for p in csvs], ignore_index=True)
 
-    # Normalize dataset/collection
     if "dataset" not in df.columns:
         df["dataset"] = ""
     if "collection" not in df.columns:
@@ -64,7 +63,6 @@ def main() -> None:
     df.loc[df["dataset"] == "", "dataset"] = df.loc[df["dataset"] == "", "collection"]
     df.loc[df["dataset"] == "", "dataset"] = "unknown"
 
-    # Ensure feature cols exist (REMOVED retrieval_k)
     for c in ["prompt_chars", "context_chars"]:
         if c not in df.columns:
             df[c] = 0
@@ -82,7 +80,6 @@ def main() -> None:
     except TypeError:
         y = df.groupby(key).apply(pick_best_model)
 
-    # Features at question-level (REMOVED retrieval_k)
     first = df.groupby(key).first().copy()
     X = first[["dataset", "prompt_chars", "context_chars"]].copy()
     X = X.loc[y.index]
@@ -94,7 +91,6 @@ def main() -> None:
         ]
     )
 
-    # Added class_weight="balanced" (to avoid always predicting the majority model)
     clf = LogisticRegression(max_iter=10000, class_weight="balanced")
     pipe = Pipeline(steps=[("pre", pre), ("clf", clf)])
     pipe.fit(X, y)
