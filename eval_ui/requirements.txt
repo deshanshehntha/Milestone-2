@@ -1,0 +1,7 @@
+streamlit
+pandas
+numpy
+tqdm
+grpcio
+chromadb
+sentence-transformers

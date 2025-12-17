@@ -285,3 +285,41 @@ services:
       - /data/chromadb:/chromadb
       - /data/results_quick:/data/results_quick
     restart: "no"
+
+  eval-ui:
+    build:
+      context: ./eval_ui
+      dockerfile: Dockerfile
+    container_name: eval-ui
+    ports:
+      - "8081:8501"
+    environment:
+      PYTHONUNBUFFERED: "1"
+
+      # must match your network names
+      ROUTER_ADDR: qa-router:50050
+      CHROMA_DB_PATH: /chromadb
+
+      RESULTS_PATH: "/data/results_quick"
+      # optional defaults for the UI inputs
+      EVAL_COLLECTIONS: "hotpotqa,narrativeqa,pubmedqa"
+      PER_COLLECTION_SAMPLES: "300"
+      PEEK_LIMIT: "5000"
+      TOP_K: "8"
+      GRPC_TIMEOUT_S: "60"
+      JSON_LOGS: "1"
+      RESTRICT_TO_SAME_QUESTION: "1"
+      EMBED_MODEL: "all-MiniLM-L6-v2"
+      MIX_SEED: "42"
+
+    volumes:
+      - /data/chromadb:/chromadb
+      - /data/results_quick:/data/results_quick
+
+      # if you prefer live-editing without rebuilds (dev mode), mount your code too:
+      # - ./eval_ui:/app
+      # - ./evaluate:/app/evaluate  (if your script lives there)
+
+    depends_on:
+      - router
+    restart: unless-stopped
