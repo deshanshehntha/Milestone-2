@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir \
     torch==2.3.0+cpu torchvision==0.18.0+cpu \
     -f https://download.pytorch.org/whl/torch_stable.html && \
     pip install --no-cache-dir \
-    grpcio grpcio-tools pandas numpy sentence-transformers transformers tqdm chromadb datasets
+    grpcio grpcio-tools pandas numpy sentence-transformers transformers tqdm chromadb datasets joblib pandas scikit-learn
 
 # Create results directory
 RUN mkdir -p /mnt/results

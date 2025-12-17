@@ -1,14 +1,9 @@
 version: "3.9"
 
 services:
-  # -------------------------
-  # Ollama (persist models on /data)
-  # -------------------------
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
-
-    # ✅ GPU access (Compose v3.9-compatible)
     deploy:
       resources:
         reservations:
@@ -16,33 +11,24 @@ services:
             - driver: nvidia
               count: all
               capabilities: ["gpu"]
-
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-      # Optional:
-      # OLLAMA_CONTEXT_LENGTH: "4096"
-
     volumes:
       - /data/ollama:/root/.ollama
-
     healthcheck:
       test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 30
-
     restart: unless-stopped
 
-  # Pull models once (so servers don't race on first run)
   setup-ollama:
     image: ollama/ollama:latest
     container_name: setup-ollama
     depends_on:
       ollama:
         condition: service_healthy
-
-    # ✅ GPU access (not required for pulling, but harmless)
     deploy:
       resources:
         reservations:
@@ -50,26 +36,19 @@ services:
             - driver: nvidia
               count: all
               capabilities: ["gpu"]
-
     environment:
       OLLAMA_HOST: http://ollama:11434
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-
     entrypoint: ["/bin/sh", "-lc"]
     command: >
       "ollama pull llama3 &&
        ollama pull qwen2.5 &&
        ollama pull mistral"
-
     volumes:
       - /data/ollama:/root/.ollama
-
     restart: "no"
 
-  # -------------------------
-  # Ollama-backed gRPC model servers
-  # -------------------------
   ollama-llama3:
     build:
       context: ./models/server
@@ -124,9 +103,40 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # -------------------------
-  # Router (Ollama-only)
-  # -------------------------
+  # ---------------------------
+  # MinIO (S3-compatible) artifact store
+  # ---------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - /data/minio:/data
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-lc"]
+    command: >
+      "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb -p local/router-artifacts || true &&
+      mc anonymous set download local/router-artifacts || true
+      "
+    restart: "no"
+
+  # ---------------------------
+  # Router (inference) - pulls model from MinIO and reloads periodically
+  # ---------------------------
   router:
     build:
       context: ./router
@@ -139,15 +149,31 @@ services:
       BACKENDS_qwen2_5: "ollama-qwen:50051"
       BACKENDS_mistral: "ollama-mistral:50051"
       DEFAULT_VARIANT: "llama3"
+      TOP_K: "6"
+
+      ROUTER_MODEL_PATH: "/data/router_model/router_model.joblib"
+      ROUTER_MODEL_RELOAD_S: "30"
+
+      ROUTER_MODEL_S3_FETCH: "1"
+      S3_ENDPOINT_URL: "http://minio:9000"
+      S3_ACCESS_KEY: "minioadmin"
+      S3_SECRET_KEY: "minioadmin"
+      S3_BUCKET: "router-artifacts"
+      S3_KEY: "router/router_model.joblib"
+
+    volumes:
+      - /data/router_model:/data/router_model
+
     depends_on:
+      - minio-init
       - ollama-llama3
       - ollama-qwen
       - ollama-mistral
     restart: unless-stopped
 
-  # -------------------------
-  # Evaluation pipeline
-  # -------------------------
+  # ---------------------------
+  # Evaluation (step 1): generates /data/results/**/evaluation_results.csv
+  # ---------------------------
   evaluate-pipeline:
     build:
       context: .
@@ -159,8 +185,103 @@ services:
       ROUTER_ADDR: qa-router:50050
       MODELS: "llama3,qwen2_5,mistral"
       GRPC_TIMEOUT_S: "180"
-      MAX_SAMPLES: "10"
+      MAX_SAMPLES: "100"
+      TOP_K: "8"
+      JSON_LOGS: "1"
+      TRAIN_ROUTER_MODEL: "0"
     volumes:
       - /data/results:/data/results
       - /data/chromadb:/chromadb
       - /data/hotpotqa.csv:/data/hotpotqa.csv
+    restart: "no"
+
+  # ---------------------------
+  # Trainers (step 2): choose ONE to run
+  # ---------------------------
+
+  # ML router trainer: outputs artifact with {router_type:"ml", ml_model:...}
+  router-trainer-ml:
+    build:
+      context: .
+      dockerfile: evaluate/Dockerfile.trainer_ml
+    container_name: router-trainer-ml
+    depends_on:
+      - minio-init
+    environment:
+      ROUTER_MODEL_PATH: "/data/router_model/router_model.joblib"
+      ROUTER_TRAIN_GLOB: "/data/results/**/evaluation_results.csv"
+      ROUTER_EM_WEIGHT: "0.25"
+      ROUTER_LAT_WEIGHT: "0.0002"
+
+      S3_ENDPOINT_URL: "http://minio:9000"
+      S3_ACCESS_KEY: "minioadmin"
+      S3_SECRET_KEY: "minioadmin"
+      S3_BUCKET: "router-artifacts"
+      S3_KEY: "router/router_model.joblib"
+      S3_REGION: "us-east-1"
+    volumes:
+      - /data/results:/data/results
+      - /data/router_model:/data/router_model
+    command: ["python", "-u", "evaluate/train_ml_router.py"]
+    restart: "no"
+
+  # Dataset router trainer: outputs artifact with {router_type:"dataset", dataset_router:{...}}
+  router-trainer-dataset:
+    build:
+      context: .
+      dockerfile: evaluate/Dockerfile.trainer_dataset
+    container_name: router-trainer-dataset
+    depends_on:
+      - minio-init
+    environment:
+      ROUTER_MODEL_PATH: "/data/router_model/router_model.joblib"
+      ROUTER_TRAIN_GLOB: "/data/results/**/evaluation_results.csv"
+      ROUTER_EM_WEIGHT: "0.25"
+      ROUTER_LAT_WEIGHT: "0.0002"
+
+      S3_ENDPOINT_URL: "http://minio:9000"
+      S3_ACCESS_KEY: "minioadmin"
+      S3_SECRET_KEY: "minioadmin"
+      S3_BUCKET: "router-artifacts"
+      S3_KEY: "router/router_model.joblib"
+      S3_REGION: "us-east-1"
+    volumes:
+      - /data/results:/data/results
+      - /data/router_model:/data/router_model
+    command: ["python", "-u", "evaluate/train_dataset_router.py"]
+    restart: "no"
+
+  evaluate-quick:
+    build:
+      context: .
+      dockerfile: evaluate/Dockerfile.inference
+    container_name: evaluate-quick
+    environment:
+      # unbuffered logs
+      PYTHONUNBUFFERED: "1"
+
+      ROUTER_ADDR: qa-router:50050
+      CHROMA_DB_PATH: /chromadb
+
+      MAX_SAMPLES: "1000"
+      TOP_K: "8"
+      GRPC_TIMEOUT_S: "60"
+
+      RESULTS_PATH: "/data/results_quick"
+      RUN_ID: "latest"   # or omit to auto timestamp
+
+      # NOTE: remove the extra space in your list
+      EVAL_COLLECTIONS: "hotpotqa,narrativeqa,pubmedqa"
+
+      JSON_LOGS: "1"
+      RESTRICT_TO_SAME_QUESTION: "1"
+      EMBED_MODEL: "all-MiniLM-L6-v2"
+
+      # IMPORTANT for “router switching” tests:
+      # set MODELS=auto and in evaluate_quick.py handle it by NOT sending ("variant", ...)
+      MODELS: "auto"
+
+    volumes:
+      - /data/chromadb:/chromadb
+      - /data/results_quick:/data/results_quick
+    restart: "no"

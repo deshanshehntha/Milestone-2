@@ -1,0 +1,10 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY evaluate/train_ml_router.py /app/evaluate/train_ml_router.py
+COPY evaluate/s3_artifacts.py /app/evaluate/s3_artifacts.py
+
+RUN pip install --no-cache-dir pandas scikit-learn joblib boto3
+
+ENTRYPOINT ["python", "/app/evaluate/train_ml_router.py"]
